@@ -1,55 +1,88 @@
-from datasets import Dataset
-from agenttune.core.backend_factory import create_agentic_trainer
-import time
-import torch
+# ===== S2 Retry with Tool-Calling Template =====
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, TaskType
+import torch, time
 
-def add(a: int, b: int) -> int:
-    """Add two integers.
-    Args:
-        a: first integer
-        b: second integer
-    """
-    return a + b
+model_id = "CohereLabs/tiny-aya-global"
 
-def used_tool(completions, **kwargs):
-    return [1.0 if "5" in str(c) else 0.0 for c in completions]
-
-train_dataset = Dataset.from_list(
-    [{"prompt": [{"role": "user", "content": "What is 2+3?"}]}] * 8
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
 )
 
-print("Starting Tiny Aya S2 test...")
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    quantization_config=bnb_config,
+    device_map="auto",
+    torch_dtype=torch.bfloat16,
+)
+
+# -------------------------------------------------
+# Custom tool-calling chat template (TRL style)
+# -------------------------------------------------
+tool_template = """{{ bos_token }}
+{%- for message in messages %}
+{%- if message['role'] == 'system' %}
+<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>
+{%- elif message['role'] == 'user' %}
+<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>
+{%- elif message['role'] == 'assistant' %}
+<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>{{ message['content'] }}<|END_RESPONSE|><|END_OF_TURN_TOKEN|>
+{%- elif message['role'] == 'tool' %}
+<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>Tool result: {{ message['content'] }}<|END_OF_TURN_TOKEN|>
+{%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>
+{%- endif %}
+"""
+
+tokenizer.chat_template = tool_template
+
+# Add LoRA
+lora_config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    target_modules="all-linear",
+    lora_dropout=0.05,
+    bias="none",
+    task_type=TaskType.CAUSAL_LM,
+)
+model = get_peft_model(model, lora_config)
+
+# Force a tool-call style prompt
+messages = [
+    {
+        "role": "system",
+        "content": "You are a helpful assistant with access to tools. When you need to use a tool, output exactly in this format:\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"arg1\": value}}\n</tool_call>"
+    },
+    {
+        "role": "user",
+        "content": "What is 2 + 3? Use the calculator tool."
+    }
+]
+
+prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+print("===== PROMPT =====")
+print(prompt)
+print("==================")
+
+inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
 start = time.time()
+with torch.no_grad():
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=150,
+        do_sample=False,
+        temperature=0.0,
+    )
+response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=False)
 
-trainer = create_agentic_trainer(
-    algorithm="grpo",
-    model="CohereLabs/tiny-aya-global",
-    train_dataset=train_dataset,
-    tools=[add],
-    reward_funcs=[used_tool],
-    output_dir="./output/tiny_aya_s2",
-    max_steps=10,                          # short smoke
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=1,
-    num_generations=2,
-    max_steps_per_turn=3,
-    use_vllm=False,                        # important
-    peft_config=dict(
-        r=16,
-        lora_alpha=32,
-        target_modules="all-linear",
-        task_type="CAUSAL_LM",
-    ),
-    report_to="none",
-)
-
-trainer.train()
-
-elapsed = time.time() - start
-print(f"\nTime taken: {elapsed:.1f} seconds")
-print(f"Approx sec/step: {elapsed / 10:.2f}")
-
-if torch.cuda.is_available():
-    print(f"Peak GPU memory: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
-
-print("S2 finished – check the output folder and logs for parseable tool calls")
+print("\n===== MODEL OUTPUT =====")
+print(response)
+print("========================")
+print(f"Time: {time.time()-start:.1f}s")
+print(f"Peak memory: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB")
