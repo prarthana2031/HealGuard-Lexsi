@@ -36,9 +36,9 @@
     "reason": "The agent checked a bucket policy before establishing the bucket list needed for the requested public-bucket search."
   },
   "dev_06_wrong_order": {
-    "label": "residual",
-    "reason": "The requested role-policy tool was called directly; the trajectory does not demonstrate an ordering violation or another specific failure category."
-  },
+  "label": "wrong_order",
+  "reason": "The agent skipped the required list_iam_roles prerequisite before calling get_role_policies."
+},
   "dev_07_premature_finish": {
     "label": "premature_finish",
     "reason": "The agent finished before calling list_buckets to gather the requested evidence."
@@ -77,7 +77,7 @@
   "reason": "Repeated the same get_bucket_policy call after AccessDenied; redundant_call takes priority over unrecovered_error."
   },
   "dev_16_unrecovered_error": {
-    "label": "unrecovered_error",
-    "reason": "The agent received a timeout and finished without recovering or retrying the failed operation."
-  }
+  "label": "env_error",
+  "reason": "The trajectory contains an injected timeout environment error, as confirmed by Person B."
+}
 }

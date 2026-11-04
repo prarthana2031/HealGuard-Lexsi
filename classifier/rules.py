@@ -85,7 +85,7 @@ def classify_trajectory(trajectory):
     # 1. Explicit environment or execution errors.
     if any(
         re.search(
-            r"\b(environment error|execution environment error)\b",
+            r"\b(environment error|execution environment error|timeout|timed out)\b",
             text,
             re.I,
         )
@@ -136,6 +136,15 @@ def classify_trajectory(trajectory):
         return "wrong_tool"
 
     # 5. Wrong order.
+
+    # IAM role policies require listing IAM roles first.
+    if (
+        "get_role_policies" in tool_names
+        and "list_iam_roles" not in tool_names
+    ):
+        return "wrong_order"
+
+    # Public bucket policies require listing buckets first.
     if (
         "public buckets" in task_lower
         and "get_bucket_policy" in tool_names

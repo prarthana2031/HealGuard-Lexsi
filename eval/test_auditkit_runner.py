@@ -83,7 +83,7 @@ class TestAuditKitRunner(unittest.TestCase):
         self.assertEqual(
             metrics["steps_on_success"]["value"], 3.0
         )
-    
+
     def test_loop_rate_uses_total_trajectories(self):
         looping = self.make_trajectory(
             "loop-1", False, 3, 3, 2, 3
@@ -130,7 +130,7 @@ class TestAuditKitRunner(unittest.TestCase):
         self.assertAlmostEqual(
             result["metrics"]["loop_rate"]["value"], 0.5
         )
-    
+
 
     def test_empty_dataset_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -159,6 +159,32 @@ class TestAuditKitRunner(unittest.TestCase):
             self.make_trajectory(
                 "t2", False, 1, 1, 0, 100
             ),
+        ]
+
+        result = evaluate_trajectories(trajectories)
+
+        self.assertEqual(
+            result["metrics"]["steps_on_success"]["value"],
+            4.0,
+        )
+    def test_steps_on_success_uses_median(self):
+        trajectories = [
+            self.make_trajectory("t1", True, 1, 1, 0, 2),
+            self.make_trajectory("t2", True, 1, 1, 0, 4),
+            self.make_trajectory("t3", True, 1, 1, 0, 100),
+        ]
+
+        result = evaluate_trajectories(trajectories)
+
+        self.assertEqual(
+            result["metrics"]["steps_on_success"]["value"],
+            4.0,
+        )
+    def test_steps_on_success_uses_median(self):
+        trajectories = [
+            self.make_trajectory("t1", True, 1, 1, 0, 2),
+            self.make_trajectory("t2", True, 1, 1, 0, 4),
+            self.make_trajectory("t3", True, 1, 1, 0, 100),
         ]
 
         result = evaluate_trajectories(trajectories)

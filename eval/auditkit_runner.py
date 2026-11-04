@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
+import statistics
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +78,7 @@ def evaluate_trajectories(
     total_trajectories = len(trajectories)
 
     successful_trajectories = 0
-    successful_steps = 0
+    successful_steps_list = []
 
     total_valid_calls = 0
     total_tool_calls = 0
@@ -110,8 +110,8 @@ def evaluate_trajectories(
 
         if success:
             successful_trajectories += 1
-            successful_steps += _validate_integer(
-                trajectory, "num_steps"
+            successful_steps_list.append(
+                _validate_integer(trajectory, "num_steps")
             )
 
         # Valid and redundant calls.
@@ -172,10 +172,12 @@ def evaluate_trajectories(
     loop_rate = looping_trajectories / total_trajectories
 
     steps_on_success = (
-        successful_steps / successful_trajectories
-        if successful_trajectories > 0
+        statistics.median(successful_steps_list)
+        if successful_steps_list
         else None
     )
+
+    successful_steps = sum(successful_steps_list)
 
     return {
         "dataset_summary": {
