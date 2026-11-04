@@ -1,12 +1,19 @@
 """
 v0 SFT harness – Person A
 Settings locked from S2 (3 Nov)
+Ready to accept expert trajectories from Person B
 """
 
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments
+import os
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    TrainingArguments,
+)
 from peft import LoraConfig, get_peft_model, TaskType
 from trl import SFTTrainer
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 import torch
 
 MODEL_ID = "CohereLabs/tiny-aya-global"
@@ -18,6 +25,7 @@ def get_model_and_tokenizer():
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
+
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
@@ -45,6 +53,9 @@ def get_model_and_tokenizer():
 """
     tokenizer.chat_template = tool_template
 
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     lora_config = LoraConfig(
         r=16,
         lora_alpha=32,
@@ -57,9 +68,70 @@ def get_model_and_tokenizer():
     return model, tokenizer
 
 
-if __name__ == "__main__":
+def make_dummy_dataset(n=12):
+    """Tiny dataset just to test the harness. Replace with real expert data later."""
+    examples = []
+    for i in range(n):
+        examples.append({
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant with access to tools. When you need to use a tool, output exactly in this format:\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"arg1\": value}}\n</tool_call>"
+                },
+                {
+                    "role": "user",
+                    "content": f"What is {i} + 3? Use the calculator tool."
+                },
+                {
+                    "role": "assistant",
+                    "content": f"<tool_call>\n{{\"name\": \"calculator\", \"arguments\": {{\"expression\": \"{i} + 3\"}}}}\n</tool_call>"
+                }
+            ]
+        })
+    return Dataset.from_list(examples)
+
+
+def main():
     print("Loading model + tokenizer...")
     model, tokenizer = get_model_and_tokenizer()
     model.print_trainable_parameters()
-    print("train_v0.py skeleton is ready.")
-    print("Next: wait for Person B expert trajectories, then fill dataset + trainer.")
+
+    # ----- Dataset -----
+    # Later: replace this with real expert trajectories from Person B
+    print("Creating dummy dataset for harness test...")
+    dataset = make_dummy_dataset(n=12)
+
+    # ----- Training Arguments -----
+    training_args = TrainingArguments(
+        output_dir=OUTPUT_DIR,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=8,
+        learning_rate=1e-4,
+        num_train_epochs=1,
+        max_steps=20,                    # short test only
+        logging_steps=5,
+        save_steps=20,
+        save_total_limit=2,
+        bf16=True,
+        report_to="none",
+        remove_unused_columns=False,
+    )
+
+    # ----- Trainer -----
+    trainer = SFTTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        tokenizer=tokenizer,
+        # max_seq_length=2048,          # uncomment if your TRL version supports it
+    )
+
+    print("Starting short harness test (20 steps)...")
+    trainer.train()
+
+    print(f"\nHarness test finished. Checkpoint saved to: {OUTPUT_DIR}")
+    print("Next: replace dummy dataset with real expert trajectories from Person B.")
+
+
+if __name__ == "__main__":
+    main()
