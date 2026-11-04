@@ -1,7 +1,19 @@
-# ===== S2 Retry with Tool-Calling Template =====
+# ===== S2 Retry with Tool-Calling Template & Person B's Tools =====
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, TaskType
 import torch, time
+import json
+
+# Import Person B's tools
+# (Assuming world/tools.py exists and has a way to get schemas)
+try:
+    from world.tools import get_tool_schemas
+    tools = get_tool_schemas()
+except ImportError:
+    print("WARNING: world/tools.py not found. Using mock tool schema.")
+    tools = [
+        {"name": "list_buckets", "description": "List all S3 buckets in the account."}
+    ]
 
 model_id = "CohereLabs/tiny-aya-global"
 
@@ -52,16 +64,22 @@ lora_config = LoraConfig(
 )
 model = get_peft_model(model, lora_config)
 
+# Dynamically build system prompt from tools
+tool_desc = "\n".join([f"- {t['name']}: {t['description']}" for t in tools])
+system_prompt = f"""You are a helpful cloud auditor with access to tools. 
+When you need to use a tool, output exactly in this format:
+<tool_call>
+{{"name": "tool_name", "arguments": {{"arg1": value}}}}
+</tool_call>
+
+Available Tools:
+{tool_desc}
+"""
+
 # Force a tool-call style prompt
 messages = [
-    {
-        "role": "system",
-        "content": "You are a helpful assistant with access to tools. When you need to use a tool, output exactly in this format:\n<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"arg1\": value}}\n</tool_call>"
-    },
-    {
-        "role": "user",
-        "content": "What is 2 + 3? Use the calculator tool."
-    }
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": "Please list all the storage buckets in the account."}
 ]
 
 prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -84,5 +102,9 @@ response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_spec
 print("\n===== MODEL OUTPUT =====")
 print(response)
 print("========================")
-print(f"Time: {time.time()-start:.1f}s")
-print(f"Peak memory: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB")
+
+# Check if it parsed
+if "<tool_call>" in response and "list_buckets" in response:
+    print("✅ S2 PASSED: Parseable tool call detected with world/tools.py!")
+else:
+    print("❌ S2 FAILED: Model did not emit a parseable tool call.")

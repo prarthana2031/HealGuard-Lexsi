@@ -1,0 +1,138 @@
+"""
+v0 SFT Training Harness – Person A (Production version)
+Fixed for TRL 1.17.1 + T4 Colab
+"""
+
+import os
+import gc
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from peft import LoraConfig, TaskType
+from trl import SFTTrainer, SFTConfig
+from datasets import load_dataset
+
+MODEL_ID = "CohereLabs/tiny-aya-global"
+OUTPUT_DIR = "./adapters/v0"
+DATASET_PATH = "data/train_clean/expert_traces.jsonl" # Person B's file
+
+def get_dtype():
+    """T4 has no native bf16 → use fp16. Newer GPUs use bf16."""
+    cap = torch.cuda.get_device_capability()[0]
+    return torch.bfloat16 if cap >= 8 else torch.float16
+
+def main():
+    # Memory safety net for Colab
+    gc.collect()
+    torch.cuda.empty_cache()
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+    dtype = get_dtype()
+    print(f"Using dtype: {dtype}")
+
+    # ----- Tokenizer + Template -----
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+
+    tool_template = """{{ bos_token }}
+{%- for message in messages %}
+{%- if message['role'] == 'system' %}
+<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>
+{%- elif message['role'] == 'user' %}
+<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>
+{%- elif message['role'] == 'assistant' %}
+<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>{{ message['content'] }}<|END_RESPONSE|><|END_OF_TURN_TOKEN|>
+{%- elif message['role'] == 'tool' %}
+<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>Tool result: {{ message['content'] }}<|END_OF_TURN_TOKEN|>
+{%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>
+{%- endif %}
+"""
+    tokenizer.chat_template = tool_template
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # ----- Model (4-bit) -----
+    compute_dtype = torch.float16
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=compute_dtype,
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        quantization_config=bnb_config,
+        device_map={"": 0},          
+        dtype=compute_dtype,         
+    )
+
+    # ----- LoRA config -----
+    lora_config = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules="all-linear",
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+    )
+
+    # ----- Load Real Dataset -----
+    print(f"Loading dataset from {DATASET_PATH}...")
+    if not os.path.exists(DATASET_PATH):
+        raise FileNotFoundError(f"Dataset not found at {DATASET_PATH}. Has Person B finished generating it?")
+        
+    dataset = load_dataset("json", data_files=DATASET_PATH, split="train")
+    print(f"Loaded {len(dataset)} expert trajectories.")
+
+    # ----- Training config -----
+    args = SFTConfig(
+        output_dir=OUTPUT_DIR,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=8,
+        learning_rate=1e-4,
+        num_train_epochs=2,            # <--- CHANGED from max_steps
+        max_length=2048,
+        assistant_only_loss=False,
+        gradient_checkpointing=True,
+
+        bf16=False,
+        fp16=True,
+
+        logging_steps=10,
+        save_steps=50,                 # <--- Crucial checkpointing for Colab
+        save_total_limit=3,
+        report_to="none",
+        remove_unused_columns=False,
+    )
+
+    # ----- Trainer -----
+    trainer = SFTTrainer(
+        model=model,
+        args=args,
+        train_dataset=dataset,
+        processing_class=tokenizer,      
+        peft_config=lora_config,         
+    )
+
+    # --- FIX: cast bf16 trainable params to fp32 ---
+    if args.fp16 and not args.bf16:
+        n_cast = 0
+        for param in trainer.model.parameters():
+            if param.requires_grad and param.dtype == torch.bfloat16:
+                param.data = param.data.to(torch.float32)
+                n_cast += 1
+        print(f"Cast {n_cast} trainable tensor(s) from bf16 -> fp32 for fp16 GradScaler.")
+
+    print("Starting v0 SFT Training...")
+    trainer.train()
+
+    # Save final adapter cleanly
+    trainer.save_model(os.path.join(OUTPUT_DIR, "final"))
+    print(f"\nTraining finished. Adapter saved to: {OUTPUT_DIR}/final")
+
+    if torch.cuda.is_available():
+        print(f"Peak GPU memory: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
+
+if __name__ == "__main__":
+    main()

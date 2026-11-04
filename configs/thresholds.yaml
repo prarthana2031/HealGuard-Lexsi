@@ -1,0 +1,21 @@
+# FROZEN ON: November 11, 2026
+# DO NOT EDIT AFTER SEALED SET IS OPENED
+gate:
+  min_n_per_bucket: 40
+  min_gain_task_success: 0.10
+  alpha: 0.05 # Paired bootstrap
+  worst_family_drop: 0.05
+  max_steps_multiplier: 1.05
+  max_new_failure_mode_share: 0.02
+
+training:
+  base_model: "CohereLabs/tiny-aya-global"
+  load_in_4bit: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  seq_length: 2048
+  batch_size: 1
+  grad_accum: 8
+  learning_rate_v0: 1e-4
+  learning_rate_heal: 5e-5
