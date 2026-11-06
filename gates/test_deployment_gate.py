@@ -213,7 +213,7 @@ class TestDeploymentGate(unittest.TestCase):
             ["worst_family_regression"]["status"],
             "PASS",
         )
-        
+
 
     def test_missing_failure_label_blocks_gate(self):
         baseline, candidate = make_paired_records()
