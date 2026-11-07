@@ -1,0 +1,9 @@
+true_label,env_error,schema_violation,wrong_tool,wrong_order,premature_finish,ungrounded_answer,loop_collapse,redundant_call
+env_error,1,0,0,0,0,0,0,0
+schema_violation,0,2,0,0,0,0,0,0
+wrong_tool,0,0,2,0,0,0,0,0
+wrong_order,0,0,0,2,0,0,0,0
+premature_finish,0,0,0,0,2,0,0,0
+ungrounded_answer,0,0,0,0,0,2,0,0
+loop_collapse,0,0,0,0,0,0,2,0
+redundant_call,0,0,0,0,0,0,0,3
