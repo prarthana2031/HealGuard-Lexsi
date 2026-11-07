@@ -245,6 +245,75 @@ class TestDeploymentGate(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_deployment_gate(baseline, candidate)
 
+    def test_gain_is_not_required_on_the_regression_bucket(self):
+        """The plan gates the gain on the targeted bucket only.
+
+        A candidate that fixes the drift and leaves clean tasks exactly as they
+        were must deploy. Requiring a gain on the regression bucket rejects the
+        normal, correct outcome.
+        """
+        baseline, candidate = make_paired_records(count=60)
+
+        # Remove every gain on gate_regression.
+        for base_record in baseline:
+            if base_record["split"] != "gate_regression":
+                continue
+            match = next(
+                record for record in candidate
+                if record["id"] == base_record["id"]
+            )
+            match["success"] = base_record["success"]
+            match["failure_mode"] = base_record["failure_mode"]
+
+        result = evaluate_deployment_gate(baseline, candidate)
+
+        regression = result["buckets"]["gate_regression"]
+        self.assertEqual(
+            regression["checks"]["task_success_gain"]["status"], "PASS"
+        )
+        self.assertEqual(
+            regression["checks"]["task_success_gain"]["detail"], "not_required"
+        )
+        self.assertEqual(result["decision"], "DEPLOY")
+
+    def test_efficiency_is_compared_on_the_clean_subset(self):
+        """A baseline that is cheaper only because it failed must not win."""
+        baseline, candidate = make_paired_records(count=60)
+
+        for record in baseline + candidate:
+            record["drift"] = "D2" if record["id"].endswith(("_0", "_1", "_2")) else "clean"
+
+        # The candidate is slower on drifted tasks only: it now does the reads
+        # the baseline skipped when it could not parse the drifted response.
+        for record in candidate:
+            if record["drift"] == "D2" and record["success"]:
+                record["num_steps"] = 40
+
+        result = evaluate_deployment_gate(baseline, candidate)
+
+        for bucket in BUCKETS:
+            check = result["buckets"][bucket]["checks"]["steps_on_success"]
+            self.assertEqual(check["status"], "PASS")
+            self.assertEqual(check["value"]["compared_on"], "clean subset")
+
+    def test_efficiency_still_fails_on_clean_regression(self):
+        baseline, candidate = make_paired_records(count=60)
+
+        for record in baseline + candidate:
+            record["drift"] = "clean"
+
+        for record in candidate:
+            if record["success"]:
+                record["num_steps"] = 9
+
+        result = evaluate_deployment_gate(baseline, candidate)
+
+        for bucket in BUCKETS:
+            self.assertEqual(
+                result["buckets"][bucket]["checks"]["steps_on_success"]["status"],
+                "FAIL",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

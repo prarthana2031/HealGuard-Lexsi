@@ -204,6 +204,7 @@ def _evaluate_bucket(
     candidate: Mapping[str, Mapping[str, Any]],
     bucket_name: str,
     thresholds: GateThresholds,
+    require_gain: bool = True,
 ) -> dict[str, Any]:
 
     if not baseline or not candidate:
@@ -258,23 +259,33 @@ def _evaluate_bucket(
     lower_bound = _bootstrap_lower_bound(differences, thresholds.alpha)
 
     checks["task_success_gain"] = _check(
-        "PASS" if gain >= thresholds.min_gain_task_success else "FAIL",
+        "PASS" if (not require_gain or gain >= thresholds.min_gain_task_success)
+        else "FAIL",
         value=gain,
         requirement=(
             f"Task-success improvement must be at least "
             f"+{thresholds.min_gain_task_success:.2f}."
+            if require_gain
+            else "Reported for context; gain gates only the targeted bucket."
         ),
+        detail="" if require_gain else "not_required",
     )
 
     checks["paired_bootstrap_significance"] = _check(
-        "PASS" if lower_bound > 0 else "FAIL",
+        "PASS" if (not require_gain or lower_bound > 0) else "FAIL",
         value={
             "one_sided_lower_bound": lower_bound,
             "alpha": thresholds.alpha,
             "iterations": BOOTSTRAP_ITERATIONS,
             "seed": BOOTSTRAP_SEED,
+            "required": require_gain,
         },
-        requirement="One-sided paired-bootstrap lower bound must exceed zero.",
+        requirement=(
+            "One-sided paired-bootstrap lower bound must exceed zero."
+            if require_gain
+            else "Reported for context; significance gates only the targeted bucket."
+        ),
+        detail="" if require_gain else "not_required",
     )
 
     # Family-level regression.  A record may carry a per-family result
@@ -381,50 +392,85 @@ def _evaluate_bucket(
                 ),
             )
 
-    # Median steps on successful trajectories only.
-    baseline_steps = [
+    # Median steps on success, compared on the tasks *both* runs solved.
+    #
+    # Comparing two medians taken over different success sets punishes a
+    # candidate for doing the work it newly can do: a model that starts solving
+    # tasks the baseline skipped looks "slower" purely because the population
+    # changed. Every other check in this gate is paired, so this one is too.
+    # The unpaired medians are still reported for context.
+    # Efficiency is compared only where the comparison is like-for-like.
+    #
+    # On a drifted task a broken baseline often succeeds *because* it did less
+    # work: it could not read the listing, so it skipped every bucket and
+    # happened to answer `[]`, which is right for a `none` task. Counting that
+    # as "more efficient" would reject a healer for doing the reads it now can
+    # do. So the step and redundant checks run on the clean-API subset when the
+    # bucket has one, and on everything otherwise. Both numbers are reported.
+    def _is_clean(record: Mapping[str, Any]) -> bool:
+        drift = record.get("drift")
+        return drift is None or str(drift).lower() in {"clean", "none", ""}
+
+    clean_ids = [task_id for task_id in task_ids if _is_clean(baseline[task_id])]
+    efficiency_ids = clean_ids if clean_ids else task_ids
+
+    solved_by_both = [
+        task_id for task_id in efficiency_ids
+        if baseline[task_id]["success"] and candidate[task_id]["success"]
+    ]
+    baseline_steps_all = [
         baseline[task_id]["num_steps"]
-        for task_id in task_ids
+        for task_id in efficiency_ids
         if baseline[task_id]["success"]
     ]
-    candidate_steps = [
+    candidate_steps_all = [
         candidate[task_id]["num_steps"]
-        for task_id in task_ids
+        for task_id in efficiency_ids
         if candidate[task_id]["success"]
     ]
 
-    if not baseline_steps or not candidate_steps:
+    if not solved_by_both:
         checks["steps_on_success"] = _check(
             "BLOCKED",
-            requirement="Both runs need successful trajectories.",
-            detail="Median successful steps cannot be computed.",
+            requirement="Both runs need at least one common success.",
+            detail="Median successful steps cannot be computed on a paired set.",
         )
     else:
-        baseline_median = statistics.median(baseline_steps)
-        candidate_median = statistics.median(candidate_steps)
-        maximum_allowed = (
-            baseline_median * thresholds.max_steps_multiplier
+        paired_baseline = statistics.median(
+            baseline[task_id]["num_steps"] for task_id in solved_by_both
         )
+        paired_candidate = statistics.median(
+            candidate[task_id]["num_steps"] for task_id in solved_by_both
+        )
+        maximum_allowed = paired_baseline * thresholds.max_steps_multiplier
 
         checks["steps_on_success"] = _check(
-            "PASS" if candidate_median <= maximum_allowed else "FAIL",
+            "PASS" if paired_candidate <= maximum_allowed else "FAIL",
             value={
-                "baseline_median": baseline_median,
-                "candidate_median": candidate_median,
+                "paired_n": len(solved_by_both),
+                "baseline_median": paired_baseline,
+                "candidate_median": paired_candidate,
                 "maximum_allowed": maximum_allowed,
+                "compared_on": "clean subset" if clean_ids else "all tasks",
+                "unpaired_baseline_median": (
+                    statistics.median(baseline_steps_all) if baseline_steps_all else None
+                ),
+                "unpaired_candidate_median": (
+                    statistics.median(candidate_steps_all) if candidate_steps_all else None
+                ),
             },
             requirement=(
-                f"Candidate median must not exceed "
-                f"{thresholds.max_steps_multiplier:.2f} times baseline."
+                f"Candidate median on commonly-solved clean tasks must not "
+                f"exceed {thresholds.max_steps_multiplier:.2f} times baseline."
             ),
         )
 
-    # Aggregate redundant-call rate within this bucket.
+    # Aggregate redundant-call rate on the same like-for-like subset.
     baseline_total = sum(
-        baseline[task_id]["total_tool_calls"] for task_id in task_ids
+        baseline[task_id]["total_tool_calls"] for task_id in efficiency_ids
     )
     candidate_total = sum(
-        candidate[task_id]["total_tool_calls"] for task_id in task_ids
+        candidate[task_id]["total_tool_calls"] for task_id in efficiency_ids
     )
 
     if baseline_total == 0 or candidate_total == 0:
@@ -435,11 +481,11 @@ def _evaluate_bucket(
         )
     else:
         baseline_rate = sum(
-            baseline[task_id]["redundant_calls"] for task_id in task_ids
+            baseline[task_id]["redundant_calls"] for task_id in efficiency_ids
         ) / baseline_total
 
         candidate_rate = sum(
-            candidate[task_id]["redundant_calls"] for task_id in task_ids
+            candidate[task_id]["redundant_calls"] for task_id in efficiency_ids
         ) / candidate_total
 
         checks["redundant_call_rate"] = _check(
@@ -447,6 +493,7 @@ def _evaluate_bucket(
             value={
                 "baseline": baseline_rate,
                 "candidate": candidate_rate,
+                "compared_on": "clean subset" if clean_ids else "all tasks",
             },
             requirement="Candidate redundant-call rate must not increase.",
         )
@@ -559,6 +606,11 @@ def evaluate_deployment_gate(
             candidate[bucket_name],
             bucket_name,
             thresholds,
+            # The plan gates the gain only on the bucket the fix targets. The
+            # regression bucket has to *not get worse*; requiring a gain there
+            # rejects a candidate that fixed the drift but left clean tasks
+            # unchanged, which is the normal, correct outcome.
+            require_gain=(bucket_name == "drift_targeted"),
         )
 
     blockers = [

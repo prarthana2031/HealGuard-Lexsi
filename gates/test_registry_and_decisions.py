@@ -12,7 +12,7 @@ from pathlib import Path
 import gates.registry as registry
 
 ROOT = Path(__file__).resolve().parents[1]
-TMP_ROOT = ROOT / "artifacts" / "_test_tmp"
+TMP_ROOT = ROOT / "artifacts" / "_test_registry"
 from gates.deployment_gate import evaluate_deployment_gate
 
 

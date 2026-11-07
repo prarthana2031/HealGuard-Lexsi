@@ -21,13 +21,14 @@ checkpoint exists.
 | Block 3 — metrics | 7 scorers, explicit direction, direction regression test | 5 scorers, no direction test | 7 + direction test |
 | Block 3 — untuned floor | Recorded | Recorded (0/20) | Same, now reproducible |
 | Block 3 — v0 ≥ 50% | A number | **No number, no adapter** | Still **missing** (GPU) |
-| Block 3 — drift damage ≥ 20 pts | Measured | **Never measured** | Measured: 40 pts each |
+| Block 3 — drift damage ≥ 20 pts | Measured | **Never measured** | Measured: 30 / 30 / 45 / 30 pts per drift |
 | Block 3 — classifier F1 ≥ 0.85 | Against injected faults | **0.0 on real failures**; "1.0" on self-authored mocks | 112/112 on a real battery; 0% residual |
-| Week 2 — replay-to-1 examples | 100% of chosen | **Not built** | 40 pairs, 100% replay-verified |
+| Week 2 — replay-to-1 examples | 100% of chosen | **Not built** | 30 pairs, 100% replay-verified |
 | Week 2 — poisoned rejection | Gate blocks it | Gate could **never** return DEPLOY (N=20 < 40) | DEPLOY vs REJECT on real records |
 | Week 2 — run_all | drift→detect→classify→generate→retrain→gate→report | `train` + `gate` only, wrong paths | All seven stages + report-only |
+| World shape | 3 families, varied answers | One coin; answers were `[]` or 3 ids | **World v2**: independent families, 0–8 findings |
 | Week 2 — article/collections/Space | Public | **Absent** | Still **absent** |
-| Tests | Green | 112 | 142 |
+| Tests | Green | 112 | 149 |
 
 ---
 
@@ -146,8 +147,8 @@ rollouts, and asserts the sealed hash still matches.
 
 | # | Finding |
 |---|---|
-| M1 | **The world is degenerate.** `snapshot.py` flips all three families together, so a vulnerable task always has exactly **3** ids, always `bucket-…-0`, `role-…-0`, `sg-…-0`. Answer-set sizes over the sealed set: `{0: 27, 3: 23}`. Consequences: `always-none` scores ≈ the none-rate (**54%** on sealed, **60%** on dev) which is above the v0 floor of 50%; a model can shortcut "check bucket 0"; and the per-family table the gate wants is measuring one correlated variable. **Not fixed** — see decision D1. |
-| M2 | **`always-none` is not near the floor.** The plan wants canaries near the floor, but with a ~50% none-rate `always-none` *is* ~50%. It measured **0.600** task success against a v0 bar of 0.500. **Partly fixed** — all four canaries are now measured and published, and **balanced success** is reported beside task success: `always-none` scores 0.500 balanced with **0.000 on vulnerable tasks**, so the free ride is visible. See D2. |
+| M1 | ~~**The world is degenerate.**~~ **RESOLVED in World v2.** `snapshot.py` v1 flipped all three families together, so a vulnerable task always had exactly **3** ids at `…-0`. Sealed answer sizes were `{0: 27, 3: 23}`; `always-none` scored the none-rate; the per-family table measured one correlated variable. v2 draws families independently and positions uniformly: answer sizes `{0,1,2,3,4,5,6,8}`, 43% of vulnerable tasks are single-family, all-three is 1.7%, index distributions uniform. Drops now differ per drift (30/30/45/30) instead of being identical, which is the tell that it is fixed. | Measured over 4,000 seeds | Fixed |
+| M2 | ~~**`always-none` is not near the floor.**~~ **RESOLVED.** Canaries are measured and published, and **balanced success** sits beside task success: `always-none` scores 0.500 task success, 0.500 balanced, **0.000 on vulnerable tasks**. Every split is now exactly 50/50 by construction, so the canary is pinned rather than incidental. | [`artifacts/results.md`](artifacts/results.md) | Fixed |
 | M3 | **D2 deviates from the plan's literal wording.** Plan: "list return becomes `{items, next_token}` instead of a bare list". Code: clean is already `{items, next_token}`, D2 renames to `{bucket_list, continuation}`. Coherent (clean is paginated per §5) but the article must state the deviation, per the plan's own "say so" rule. |
 | M4 | **One template only**, so the plan's "held-out templates" is vacuous. Recorded in `tests/test_no_leakage.py` rather than pretended. |
 | M5 | **`compare.py`-style stock-loop comparison absent.** The plan allows a written paragraph instead; that paragraph is not written yet. |
@@ -194,8 +195,43 @@ Regenerated: `train_clean` (no duplicate calls), `dev`, `drift_targeted`
 (actually D1), `gate_regression` (clean + other drifts), `data/heal/*`.
 **The sealed set was not touched**; its hash still matches the committed value.
 
-Verified now: `python -m pytest -q` → **142 passed**; `python run_all.py --stage all`
-→ DEPLOY + REJECT, 40-point drift damage, 40 replay-verified pairs.
+Verified now: `python -m pytest -q` → **149 passed**; `python run_all.py --stage all`
+→ DEPLOY + REJECT, 30/30/45/30-point drift damage, 30 replay-verified pairs.
+The sealed set was re-frozen once for world v2, before it was ever opened.
+
+---
+
+## 5a. World v2 (the second pass)
+
+Requested after the first audit, executed the same day. What changed:
+
+| File | Change |
+|---|---|
+| [`world/snapshot.py`](world/snapshot.py) | Rewritten: independent family draws, uniform positions, 2–4 buckets, decoys in every family, answer sets 0–8 |
+| [`data/splits/build_splits.py`](data/splits/build_splits.py) | Seed ledger with exactly 50/50 `none` per split; reserved blocks; `gate_regression` keeps 42 clean + 6 D2 + 6 D3 + 6 D4 |
+| [`data/splits/sealed_freeze.md`](data/splits/sealed_freeze.md) | Re-freeze record: both hashes, the reason, and the statement that the set was never opened |
+| [`data/archive/world_v1/`](data/archive/world_v1/README.md) | The 80 real v1 rollouts, archived and labelled. They cannot be reused: under v2 the same seed is a different account |
+| [`data/splits/seed_ledger.json`](data/splits/seed_ledger.json) | Every assigned seed, so a regeneration is auditable |
+| [`gates/deployment_gate.py`](gates/deployment_gate.py) | Two real bugs found by the new data — see below |
+| [`tests/test_no_leakage.py`](tests/test_no_leakage.py) | Asserts the v2 properties: exactly half `none`, ≥4 answer sizes, index 0 under 45% of findings, at least one single-family task |
+
+**Two gate bugs that world v2 exposed.** The gate rejected its own ceiling, which
+is how they surfaced:
+
+1. `task_success_gain ≥ 0.10` was applied to **both** buckets. The plan gates the
+   gain only on the bucket the fix targets; the regression bucket has to *not get
+   worse*. A candidate that fixes the drift and leaves clean tasks unchanged is
+   the normal, correct outcome, and it was being rejected.
+2. `steps_on_success` compared two medians taken over **different success sets**.
+   On a drifted task the broken baseline succeeds *because* it did less work — it
+   could not read the listing, skipped every resource, and answered `[]`, which is
+   correct for a `none` task. The healer was penalised for doing the reads it now
+   can do. Efficiency is now paired, on the clean-API subset, with the unpaired
+   medians still reported.
+
+Both fixes are covered by new tests
+([`gates/test_deployment_gate.py`](gates/test_deployment_gate.py)) and documented
+in [`gates/README.md`](gates/README.md).
 
 ---
 
@@ -203,10 +239,12 @@ Verified now: `python -m pytest -q` → **142 passed**; `python run_all.py --sta
 
 In order. Nothing here is optional for a competitive packet.
 
-1. **Train v0 with the fixed data** (`training/train_v0.py`, free T4, ~16 min).
-   Then run `eval/run_agent.py`'s equivalent against the model and replace
-   `artifacts/runs/*.jsonl`. This is the number the whole packet rests on.
-2. **Decide D1** (world redesign) before you train, because it changes the data.
+1. **Train v0 on world v2** (`training/train_v0.py`, free T4, ~16 min). The data
+   changed, so the v1 checkpoint learned the wrong recovery *and* a world that no
+   longer exists. Then replace `artifacts/runs/*.jsonl` with model records. This
+   is the number the whole packet rests on.
+2. **Generate v2 drift rollouts** into `data/drift_train/` (see the README there)
+   once v0 can call tools, then `python -m heal.examples --source rollouts`.
 3. **Train v1_good and v1_poisoned** on `data/heal/*` (one GPU job at a time).
 4. **Run the gate on model records**, not policy records, and commit the decision
    log. The log is the evidence; the article is a view of it.
@@ -223,14 +261,22 @@ system prompt, measure, write down what happens) and the stock-loop paragraph.
 
 ## 7. Decisions for you
 
-**D1 — redesign the world? (my recommendation: yes, today)**
-The degenerate generator (M1) is the one thing a sharp judge can use to dismiss
-the *result* rather than the code. Fixing it means decoupling the three families,
-varying answer-set size, and regenerating every split — including re-freezing the
-sealed hash, which is legitimate only because the set has not been opened and the
-hash has no public artifact pointing at it yet. Cost: half a day plus a v0 retrain.
-Payoff: `always-none` drops toward 0, answers stop being 3 ids, and the per-family
-table becomes real.
+**D1 — redesign the world? → DONE (World v2).**
+Families are decoupled, answer sizes vary from 0 to 8, positions are uniform, and
+every split is exactly half `none` by seed selection. The sealed set was
+re-frozen once, before it was ever opened; both hashes and the reason are in
+[`data/splits/sealed_freeze.md`](data/splits/sealed_freeze.md). Effects measured:
+
+| Property | v1 | v2 |
+|---|---|---|
+| Answer-set sizes | `{0, 3}` | `{0,1,2,3,4,5,6,8}` |
+| Single-family vulnerable task | never | 43% |
+| All three families at once | always | 1.7% |
+| `always-none` task success | 0.60 | 0.50 |
+| Drift drops | 40 / 40 / 40 / 40 | 30 / 30 / 45 / 30 |
+
+The last row is the proof: v1 could not produce different drifts because one
+missed bucket made the whole answer set wrong. v2 can, and does.
 
 **D2 — add balanced accuracy beside task success? → DONE, keep it.**
 `balanced_success = (success on none-tasks + success on vulnerable tasks) / 2` is
@@ -239,10 +285,10 @@ now computed for every condition and every canary, and published in
 
 | Policy | Task success | Balanced | On `none` | On vulnerable |
 |---|---:|---:|---:|---:|
-| always-none | 0.600 | **0.500** | 1.000 | **0.000** |
+| always-none | 0.500 | **0.500** | 1.000 | **0.000** |
 | always-all | 0.000 | 0.000 | 0.000 | 0.000 |
-| finish-immediately | 0.600 | **0.500** | 1.000 | **0.000** |
-| repeat-one-call | 0.600 | **0.500** | 1.000 | **0.000** |
+| finish-immediately | 0.500 | **0.500** | 1.000 | **0.000** |
+| repeat-one-call | 0.500 | **0.500** | 1.000 | **0.000** |
 
 `always-none` used to look like it cleared the 50% v0 bar. It now obviously does
 not. Report both columns in the article; use balanced success only as the
@@ -257,10 +303,11 @@ limitations.
 
 ## 8. The three sentences that matter for the article
 
-1. **A drift that hurts:** each injected drift costs the baseline 40 points on
-   held-out seeds, measured, not asserted.
-2. **Examples that replay:** 40 minimal-edit pairs for D1, 100% of chosen traces
+1. **A drift that hurts:** each injected drift costs the baseline 30, 30, 45 and
+   30 points on held-out seeds — measured, not asserted, and now *different per
+   drift* because world v2 lets a drift break one family at a time.
+2. **Examples that replay:** 30 minimal-edit pairs for D1, 100% of chosen traces
    replay to a perfect reward, asserted in CI on the emitted file, not the manifest.
 3. **A gate that blocks a bad retrain:** the good candidate DEPLOYs on a one-sided
-   paired bootstrap; the poisoned candidate is REJECTed on seven named checks,
-   each printed with its number.
+   paired bootstrap; the poisoned candidate is REJECTed on six named checks, each
+   printed with its number.

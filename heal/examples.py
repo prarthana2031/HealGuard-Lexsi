@@ -112,17 +112,22 @@ def stale_agent_trace(seed: int, drift: str) -> dict[str, Any]:
 
 
 def load_rollouts(drift: str) -> list[dict[str, Any]]:
-    path = ROOT / "data" / "drift_train" / "v0_failed_rollouts.jsonl"
-    if not path.is_file():
-        return []
+    """Every `data/drift_train/*.jsonl` row for this drift.
+
+    World v1 rollouts live in `data/archive/world_v1/` and are deliberately not
+    read here: under world v2 the same seed is a different account, so a v1
+    failure cannot be repaired into a v2 example.
+    """
     rows = []
-    with path.open(encoding="utf-8") as file:
-        for line in file:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if row.get("drift") == drift:
-                row["source"] = "rollouts"
+    for path in sorted((ROOT / "data" / "drift_train").glob("*.jsonl")):
+        with path.open(encoding="utf-8") as file:
+            for line in file:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if row.get("drift") != drift:
+                    continue
+                row["source"] = f"rollouts:{path.name}"
                 rows.append(row)
     return rows
 

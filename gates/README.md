@@ -93,14 +93,32 @@ Missing failure labels block the check.
 
 ## 9. Deployment Checks
 
-1. Paired task coverage.
-2. Minimum 40 observations in each evaluation bucket.
-3. Task-success improvement of at least 0.10.
-4. One-sided paired-bootstrap lower confidence bound greater than zero.
-5. Worst-family regression no greater than 0.05.
-6. Median successful steps no greater than 1.05 times baseline.
-7. Redundant-call rate must not increase.
-8. No failure label may newly exceed 2% share.
+The gain is gated **only on the targeted bucket**. The regression bucket has to
+*not get worse*; requiring a gain there would reject a candidate that fixed the
+drift and left clean behaviour unchanged, which is the normal outcome.
+
+| Check | `drift_targeted` | `gate_regression` |
+|---|---|---|
+| Paired task coverage | gate | gate |
+| Minimum 40 observations | gate | gate |
+| Task-success gain ≥ 0.10 | **gate** | reported, not gated |
+| Paired-bootstrap lower bound > 0 | **gate** | reported, not gated |
+| Worst-family drop ≤ 0.05 | gate | **gate** |
+| Median successful steps ≤ 1.05× | gate | gate |
+| Redundant-call rate not higher | gate | gate |
+| No label newly above 2% | gate | gate |
+
+### Efficiency is compared like-for-like
+
+`steps_on_success` and `redundant_call_rate` are computed on the tasks **both
+runs solved**, and on the **clean-API subset** when the bucket has one.
+
+Why: on a drifted task a broken baseline often succeeds *because* it did less
+work. It could not read the listing, so it skipped every resource and happened
+to answer `[]`, which is correct for a `none` task. Counting that as "more
+efficient" rejects a healer for doing the reads it now can do. The unpaired
+medians are still reported in the check value, alongside `compared_on`, so
+nothing is hidden.
 
 Bootstrap configuration:
 - Iterations: 10,000.
@@ -109,10 +127,16 @@ Bootstrap configuration:
 
 ## 10. Result Status
 
-- `PASS`: All checks meet their requirements.
-- `FAIL`: At least one measured criterion violates its threshold.
-- `BLOCKED`: Required evidence is missing, sample counts are insufficient,
-  or task coverage differs.
+Internal status, and the published outcome it maps to:
+
+| Status | Published | Meaning |
+|---|---|---|
+| `PASS` | `DEPLOY` | All checks meet their requirements. |
+| `FAIL` | `REJECT` | At least one measured criterion violates its threshold. `failed_checks` names them. |
+| `BLOCKED` | `NEED_MORE_DATA` | Evidence missing, sample counts insufficient, or task coverage differs. |
+
+Every outcome is appended to `artifacts/decision_log.jsonl` with every number,
+the frozen thresholds, and a human-readable `reason`.
 
 ## 11. Usage
 

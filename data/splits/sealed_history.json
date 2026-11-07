@@ -1,0 +1,14 @@
+[
+  {
+    "version": "world v1",
+    "sha256": "fc7dcf2d675620db4aa12077ac9a8cef175b46ab7960965939a6864ace3a46a7",
+    "recorded_at": "2026-11-05T00:00:00+00:00",
+    "reason": "Initial sealed set, generated before the world redesign."
+  },
+  {
+    "version": "world v2",
+    "sha256": "19abf859754430298beedf84a08c7c1db7bcad93355669537cf869f3c384118a",
+    "recorded_at": "2026-11-07T15:15:35.944471+00:00",
+    "reason": "World v2: generator changed (families decoupled, answer sizes varied, positions randomised), so every snapshot for every seed changed."
+  }
+]

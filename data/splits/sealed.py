@@ -1,14 +1,12 @@
-"""Read the sealed set as a task list, not as a trace bundle.
+"""Read the sealed set as a task list.
 
-The sealed file is hash-locked and was generated before the trajectory contract
-settled, so its rows carry `task_id`/`is_correct` rather than the scorer fields.
-That is fine: the sealed set's job is to supply **tasks and their ground truth**.
-The agent's own traces are what gets scored, and the oracle recomputes the truth
-from the seed anyway.
+The sealed file is hash-locked and regenerated once for world v2
+(`data/splits/sealed_freeze.md` records both hashes). Its job is to supply
+**tasks and their ground truth**; the agent's own traces are what gets scored,
+and the oracle recomputes the truth from the seed anyway.
 
-Rewriting the file to make a schema test pass would break the committed sha256
-and move the goalposts. Instead the file is verified and read through this
-module.
+This module verifies the hash before handing out a single task, and refuses to
+serve a file whose stored answers disagree with the oracle.
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ def verify_sealed_hash() -> bool:
 
 
 def load_sealed_tasks(verify: bool = True) -> list[dict]:
-    """Return `{task_id, seed, truth}` for every sealed task."""
+    """Return `{task_id, seed, truth, answer_kind}` for every sealed task."""
     if verify and not verify_sealed_hash():
         raise RuntimeError(
             "sealed split hash does not match the committed hash — it has been "
@@ -57,10 +55,11 @@ def load_sealed_tasks(verify: bool = True) -> list[dict]:
                 )
             tasks.append(
                 {
-                    "task_id": row.get("task_id") or row.get("id"),
+                    "task_id": row.get("id") or row.get("task_id"),
                     "seed": seed,
                     "truth": truth,
                     "drift": row.get("drift"),
+                    "answer_kind": row.get("answer_kind"),
                 }
             )
     return tasks

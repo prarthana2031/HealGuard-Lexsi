@@ -1,32 +1,32 @@
 {
   "clean": {
-    "n": 20,
+    "n": 40,
     "task_success": 1.0,
     "drop_vs_clean": 0.0,
     "meets_20_point_bar": true
   },
   "D1": {
-    "n": 20,
-    "task_success": 0.6,
-    "drop_vs_clean": 0.4,
+    "n": 40,
+    "task_success": 0.7,
+    "drop_vs_clean": 0.30000000000000004,
     "meets_20_point_bar": true
   },
   "D2": {
-    "n": 20,
-    "task_success": 0.6,
-    "drop_vs_clean": 0.4,
+    "n": 40,
+    "task_success": 0.7,
+    "drop_vs_clean": 0.30000000000000004,
     "meets_20_point_bar": true
   },
   "D3": {
-    "n": 20,
-    "task_success": 0.6,
-    "drop_vs_clean": 0.4,
+    "n": 40,
+    "task_success": 0.55,
+    "drop_vs_clean": 0.44999999999999996,
     "meets_20_point_bar": true
   },
   "D4": {
-    "n": 20,
-    "task_success": 0.6,
-    "drop_vs_clean": 0.4,
+    "n": 40,
+    "task_success": 0.7,
+    "drop_vs_clean": 0.30000000000000004,
     "meets_20_point_bar": true
   }
 }

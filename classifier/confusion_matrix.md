@@ -46,7 +46,13 @@ Each trajectory is produced by running a deliberately broken policy against the 
 
 ## 2. Field rollouts (real model output under the four injected drifts)
 
-The classifier sees only the trace. The injected drift is the known cause, so a label counts as accepted when it is one the plan lists for that drift.
+The classifier sees only the trace. The injected drift is the known 
+cause, so a label counts as accepted when it is one the plan lists 
+for that drift.
+
+> These rollouts come from **world v1** and are archived. They are kept 
+> because the classifier reads traces, not worlds; they are not a 
+> world-v2 model result.
 
 - Trajectories: 80
 - Accepted-label share: 0.5000

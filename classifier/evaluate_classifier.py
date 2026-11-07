@@ -34,7 +34,10 @@ from classifier.rules import PRIORITY, classify  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 BATTERY = ROOT / "classifier" / "fixtures" / "failure_battery.jsonl"
-FIELD = ROOT / "data" / "drift_train" / "v0_failed_rollouts.jsonl"
+# World v1 rollouts, archived. The classifier reads traces, not worlds, so this
+# is still valid evidence — but it is not a world-v2 model number and the report
+# says so.
+FIELD = ROOT / "data" / "archive" / "world_v1" / "v0_failed_rollouts.jsonl"
 
 # What the plan says each injected drift should look like.  Used only to decide
 # whether the classifier's label is one of the accepted labels for that cause.
@@ -230,9 +233,13 @@ def write_report(battery: dict, field: dict) -> None:
         lines.append("Field rollouts not present.")
     else:
         lines += [
-            "The classifier sees only the trace. The injected drift is the known "
-            "cause, so a label counts as accepted when it is one the plan lists "
+            "The classifier sees only the trace. The injected drift is the known ",
+            "cause, so a label counts as accepted when it is one the plan lists ",
             "for that drift.",
+            "",
+            "> These rollouts come from **world v1** and are archived. They are kept ",
+            "> because the classifier reads traces, not worlds; they are not a ",
+            "> world-v2 model result.",
             "",
             f"- Trajectories: {field['n']}",
             f"- Accepted-label share: {field['accepted_share']:.4f}",

@@ -195,6 +195,13 @@ def stage_detect() -> None:
 
 
 def stage_classify() -> None:
+    # Rebuild the battery first: it is generated from the live world, so a stale
+    # fixture would silently score the classifier against an old environment.
+    subprocess.run(
+        [sys.executable, "-m", "classifier.build_failure_battery"],
+        cwd=ROOT,
+        check=True,
+    )
     subprocess.run(
         [sys.executable, "-m", "classifier.evaluate_classifier"],
         cwd=ROOT,
