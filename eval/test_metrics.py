@@ -58,19 +58,62 @@ class TestHealGuardMetrics(unittest.TestCase):
             trajectory_to_sample(self.trajectory)
         )
 
-    def test_all_five_scorers_registered(self):
+    def test_all_seven_scorers_registered(self):
         expected = [
             "task_success",
             "valid_call_rate",
             "redundant_rate",
             "loop_rate",
             "steps_on_success",
+            "tool_selection_acc",
+            "arg_accuracy",
         ]
 
         self.assertEqual(
             [metric.name for metric in METRICS],
             expected,
         )
+
+    def test_directions_match_the_plan(self):
+        """A wrong direction silently flips every later gate verdict."""
+        import auditkit as ak
+
+        maximize = {"task_success", "valid_call_rate", "tool_selection_acc", "arg_accuracy"}
+        minimize = {"redundant_rate", "loop_rate", "steps_on_success"}
+
+        for metric in METRICS:
+            with self.subTest(metric=metric.name):
+                if metric.name in maximize:
+                    self.assertEqual(metric.direction, ak.Direction.MAXIMIZE)
+                else:
+                    self.assertTrue(metric.name in minimize)
+                    self.assertEqual(metric.direction, ak.Direction.MINIMIZE)
+
+    def test_worse_redundant_rate_is_not_an_improvement(self):
+        """The plan's explicit regression test for scorer direction."""
+        import auditkit as ak
+
+        worse = dict(self.trajectory)
+        worse["redundant_calls"] = 1
+        worse["total_tool_calls"] = 2
+
+        better = self.sample, self.output, self.context
+        worse_sample, worse_output, worse_context = trajectory_to_sample(worse)
+
+        better_score = METRICS[2](*better)
+        worse_score = METRICS[2](worse_sample, worse_output, context=worse_context)
+
+        self.assertGreater(worse_score.value, better_score.value)
+
+        # Under MINIMIZE the comparison must call that a regression, not a win.
+        self.assertEqual(worse_score.direction, ak.Direction.MINIMIZE)
+        delta = worse_score.value - better_score.value
+        improved = (
+            delta > 0
+            if worse_score.direction == ak.Direction.MAXIMIZE
+            else delta < 0
+        )
+        self.assertFalse(improved)
 
     def test_task_success(self):
         score = METRICS[0](

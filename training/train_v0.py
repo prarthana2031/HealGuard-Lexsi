@@ -88,12 +88,16 @@ def main():
         # max_steps=10,
         num_train_epochs=3,                        # Max epochs, but early stopping will cut this short
         max_length=2048,
-        assistant_only_loss=False,
+        # Loss only on assistant tokens.  With assistant_only_loss=False the
+        # model also learns to reproduce the system prompt and every tool
+        # result, which is why a low eval loss can coexist with a model that
+        # cannot call a tool.
+        assistant_only_loss=True,
         gradient_checkpointing=True,
         bf16=False,
         fp16=True,
         logging_steps=5,
-        save_steps=10,
+        save_steps=50,
         save_total_limit=3,
         report_to="none",
         remove_unused_columns=False,

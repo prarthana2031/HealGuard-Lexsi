@@ -1,150 +1,308 @@
-﻿import csv
+"""Score the rule classifier on evidence it did not author.
+
+Two evaluations, reported separately because they answer different questions.
+
+1. **Constructed battery** (`classifier/fixtures/failure_battery.jsonl`).
+   Every trajectory is produced by running a deliberately broken policy against
+   the real environment and the real drift wrappers, and the ground-truth label
+   is the policy name fixed before classification.  This is the coverage
+   measurement: does each rule fire on a real instance of its own failure?
+
+2. **Field rollouts** (`data/drift_train/v0_failed_rollouts.jsonl`).
+   Real model output under the four injected drifts.  No labels are invented:
+   the drift is the known cause, the classifier sees only the trace.  This is
+   the honest number and it is allowed to be ugly.
+
+Neither evaluation uses an LLM.  Residual failures are counted, never sent out.
+
+Usage:
+    python -m classifier.evaluate_classifier
+"""
+
+from __future__ import annotations
+
+import csv
 import json
+import os
+import sys
 from collections import Counter
 from pathlib import Path
 
-from classifier.rules import PRIORITY, classify_trajectory
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from classifier.rules import PRIORITY, classify  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = ROOT / "tests" / "fixtures"
-EXPECTED_FILE = FIXTURES / "expected_labels.json"
-MOCK_FILE = FIXTURES / "mock_trajectories_20.jsonl"
+BATTERY = ROOT / "classifier" / "fixtures" / "failure_battery.jsonl"
+FIELD = ROOT / "data" / "drift_train" / "v0_failed_rollouts.jsonl"
 
-with EXPECTED_FILE.open(encoding="utf-8") as f:
-    expected = json.load(f)
-
-with MOCK_FILE.open(encoding="utf-8") as f:
-    trajectories = [json.loads(line) for line in f if line.strip()]
-
-actual_ids = {t["task_id"] for t in trajectories}
-missing_ids = sorted(set(expected) - actual_ids)
-
-rows = []
-for trajectory in trajectories:
-    task_id = trajectory["task_id"]
-    if task_id not in expected:
-        raise ValueError(f"Missing expected label for {task_id}")
-
-    true_label = expected[task_id]["label"]
-    predicted_label = classify_trajectory(trajectory)
-    rows.append((task_id, true_label, predicted_label))
-
-def display(label):
-    return "no_failure" if label is None else label
-
-observed = {label for _, true, pred in rows for label in (true, pred)}
-labels = [label for label in PRIORITY if label in observed]
-if None in observed:
-    labels.append(None)
-
-matrix = {
-    true: {
-        pred: sum(1 for _, t, p in rows if t == true and p == pred)
-        for pred in labels
-    }
-    for true in labels
+# What the plan says each injected drift should look like.  Used only to decide
+# whether the classifier's label is one of the accepted labels for that cause.
+DRIFT_ACCEPTED_LABELS = {
+    "D1": {"drift_mismatch", "schema_violation"},
+    "D2": {"drift_mismatch", "ungrounded_answer", "loop_collapse", "premature_finish"},
+    "D3": {"drift_mismatch", "schema_violation"},
+    "D4": {"drift_mismatch", "wrong_tool"},
 }
 
-metrics = []
-for label in labels:
-    tp = matrix[label][label]
-    fp = sum(matrix[other][label] for other in labels if other != label)
-    fn = sum(matrix[label][other] for other in labels if other != label)
 
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall else 0.0
-    )
-    support = sum(matrix[label].values())
-    metrics.append((label, precision, recall, f1, support))
+def load(path: Path) -> list[dict]:
+    with path.open(encoding="utf-8") as file:
+        return [json.loads(line) for line in file if line.strip()]
 
-accuracy = (
-    sum(1 for _, true, pred in rows if true == pred) / len(rows)
-    if rows else 0.0
-)
-macro_f1 = (
-    sum(item[3] for item in metrics) / len(metrics)
-    if metrics else 0.0
-)
 
-# Save confusion matrix CSV.
-csv_path = ROOT / "classifier" / "confusion_matrix.csv"
-with csv_path.open("w", newline="", encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["true_label"] + [display(x) for x in labels])
-    for true in labels:
-        writer.writerow(
-            [display(true)] + [matrix[true][pred] for pred in labels]
+def confusion(rows, true_key, predicted_key) -> tuple[dict, list]:
+    labels = [label for label in PRIORITY]
+    matrix = {
+        true: {pred: 0 for pred in labels}
+        for true in labels
+    }
+    for row in rows:
+        true = row[true_key]
+        predicted = row[predicted_key]
+        if true not in matrix:
+            matrix[true] = {pred: 0 for pred in labels}
+        matrix[true][predicted] = matrix[true].get(predicted, 0) + 1
+    return matrix, labels
+
+
+def prf(matrix, labels) -> list[dict]:
+    metrics = []
+    for label in labels:
+        tp = matrix.get(label, {}).get(label, 0)
+        fp = sum(
+            matrix.get(other, {}).get(label, 0)
+            for other in labels
+            if other != label
+        )
+        fn = sum(
+            count
+            for pred, count in matrix.get(label, {}).items()
+            if pred != label
+        )
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if precision + recall else 0.0
+        )
+        metrics.append(
+            {
+                "label": label,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "support": tp + fn,
+            }
+        )
+    return metrics
+
+
+def evaluate_battery() -> dict:
+    rows = load(BATTERY)
+    predictions = []
+    for row in rows:
+        result = classify(row)
+        predictions.append(
+            {
+                "true": row["expected_label"],
+                "predicted": result["primary"],
+                "task_id": row["task_id"],
+                "drift_inferred": result["drift_inferred"],
+            }
         )
 
-# Save report.
-report = [
-    "# Rule Classifier Evaluation",
-    "",
-    f"- Trajectories evaluated: {len(rows)}",
-    f"- Accuracy: {accuracy:.4f}",
-    f"- Macro-F1 (represented classes): {macro_f1:.4f}",
-    f"- Expected-label entries: {len(expected)}",
-    f"- Expected entries not present in mock file: {len(missing_ids)}",
-    "",
-    "## Confusion matrix",
-    "",
-    "| True \\\\ Predicted | " + " | ".join(display(x) for x in labels) + " |",
-    "| " + " | ".join(["---"] * (len(labels) + 1)) + " |",
-]
+    matrix, labels = confusion(predictions, "true", "predicted")
+    metrics = prf(matrix, labels)
 
-for true in labels:
-    values = [str(matrix[true][pred]) for pred in labels]
-    report.append(
-        "| " + display(true) + " | " + " | ".join(values) + " |"
+    correct = sum(1 for item in predictions if item["true"] == item["predicted"])
+    macro_f1 = sum(item["f1"] for item in metrics) / len(metrics)
+
+    return {
+        "n": len(rows),
+        "accuracy": correct / len(rows) if rows else 0.0,
+        "macro_f1": macro_f1,
+        "labels": labels,
+        "matrix": matrix,
+        "metrics": metrics,
+        "predictions": predictions,
+    }
+
+
+def evaluate_field() -> dict:
+    if not FIELD.is_file():
+        return {"available": False}
+
+    rows = load(FIELD)
+    per_drift = {}
+    residuals = 0
+    accepted = 0
+
+    for drift in ("D1", "D2", "D3", "D4"):
+        subset = [row for row in rows if row.get("drift") == drift]
+        if not subset:
+            continue
+        counter = Counter()
+        drift_accepted = 0
+        for row in subset:
+            primary = classify(row)["primary"]
+            counter[primary] += 1
+            if primary in DRIFT_ACCEPTED_LABELS.get(drift, set()):
+                drift_accepted += 1
+            if primary == "residual":
+                residuals += 1
+        accepted += drift_accepted
+        per_drift[drift] = {
+            "n": len(subset),
+            "labels": dict(counter),
+            "accepted_share": drift_accepted / len(subset),
+        }
+
+    total = len(rows)
+    return {
+        "available": True,
+        "n": total,
+        "per_drift": per_drift,
+        "residual_share": residuals / total if total else 0.0,
+        "accepted_share": accepted / total if total else 0.0,
+    }
+
+
+def write_report(battery: dict, field: dict) -> None:
+    labels = battery["labels"]
+    matrix = battery["matrix"]
+
+    lines = [
+        "# Rule Classifier Evaluation",
+        "",
+        "Generated by `python -m classifier.evaluate_classifier`. Do not hand-edit.",
+        "",
+        "## 1. Constructed battery (coverage)",
+        "",
+        "Each trajectory is produced by running a deliberately broken policy "
+        "against the real environment and the real drift wrappers. The "
+        "ground-truth label is the policy name, fixed before classification. "
+        "The classifier never sees a `drift` field.",
+        "",
+        f"- Trajectories: {battery['n']}",
+        f"- Accuracy: {battery['accuracy']:.4f}",
+        f"- Macro-F1 (11 classes): {battery['macro_f1']:.4f}",
+        "",
+        "### Confusion matrix",
+        "",
+        "| True \\\\ Predicted | " + " | ".join(labels) + " |",
+        "| " + " | ".join(["---"] * (len(labels) + 1)) + " |",
+    ]
+
+    for true in labels:
+        lines.append(
+            "| "
+            + true
+            + " | "
+            + " | ".join(str(matrix.get(true, {}).get(pred, 0)) for pred in labels)
+            + " |"
+        )
+
+    lines += [
+        "",
+        "### Per-class metrics",
+        "",
+        "| Class | Precision | Recall | F1 | Support |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for item in battery["metrics"]:
+        lines.append(
+            f"| {item['label']} | {item['precision']:.4f} | {item['recall']:.4f} "
+            f"| {item['f1']:.4f} | {item['support']} |"
+        )
+
+    lines += [
+        "",
+        "**Scope.** One canonical construction per label. A perfect score here "
+        "means every rule fires on the textbook instance of its own failure; it "
+        "is not a generalisation claim. The field number below is the honest one.",
+        "",
+        "## 2. Field rollouts (real model output under the four injected drifts)",
+        "",
+    ]
+
+    if not field.get("available"):
+        lines.append("Field rollouts not present.")
+    else:
+        lines += [
+            "The classifier sees only the trace. The injected drift is the known "
+            "cause, so a label counts as accepted when it is one the plan lists "
+            "for that drift.",
+            "",
+            f"- Trajectories: {field['n']}",
+            f"- Accepted-label share: {field['accepted_share']:.4f}",
+            f"- Residual share: {field['residual_share']:.4f}",
+            "",
+            "| Drift | N | Predicted labels | Accepted share |",
+            "|---|---:|---|---:|",
+        ]
+        for drift, detail in field["per_drift"].items():
+            labels_text = ", ".join(
+                f"{label} x{count}"
+                for label, count in sorted(detail["labels"].items())
+            )
+            lines.append(
+                f"| {drift} | {detail['n']} | {labels_text} "
+                f"| {detail['accepted_share']:.4f} |"
+            )
+        lines += [
+            "",
+            "The field number is low because these rollouts come from the "
+            "**untuned** model, which emits prose instead of tool calls. Under "
+            "the taxonomy that is `schema_violation`, not `drift_mismatch`: there "
+            "is no tool call whose name or argument could be in the schema diff. "
+            "The classifier reports that honestly instead of inventing a drift "
+            "label from a filename, which is what the previous version did.",
+        ]
+
+    (ROOT / "classifier" / "confusion_matrix.md").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
     )
 
-report += [
-    "",
-    "## Per-class metrics",
-    "",
-    "| Class | Precision | Recall | F1 | Support |",
-    "|---|---:|---:|---:|---:|",
-]
+    with (ROOT / "classifier" / "confusion_matrix.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as file:
+        writer = csv.writer(file)
+        writer.writerow(["true_label"] + labels)
+        for true in labels:
+            writer.writerow(
+                [true] + [matrix.get(true, {}).get(pred, 0) for pred in labels]
+            )
 
-for label, precision, recall, f1, support in metrics:
-    report.append(
-        f"| {display(label)} | {precision:.4f} | {recall:.4f} "
-        f"| {f1:.4f} | {support} |"
+    (ROOT / "classifier" / "fixtures" / "classifier_metrics.json").write_text(
+        json.dumps(
+            {
+                "battery": {
+                    "n": battery["n"],
+                    "accuracy": battery["accuracy"],
+                    "macro_f1": battery["macro_f1"],
+                    "per_class": battery["metrics"],
+                },
+                "field": field,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
     )
 
-represented = {display(label) for label in labels}
-unrepresented = [
-    label for label in PRIORITY if display(label) not in represented
-]
 
-report += [
-    "",
-    "## Coverage limitations",
-    "",
-    "The macro-F1 above includes only classes represented in the "
-    "fixture's true or predicted labels. It is not a full 11-class "
-    "validation score.",
-    "",
-    "Taxonomy labels without fixture coverage: "
-    + (", ".join(unrepresented) if unrepresented else "None"),
-    "",
-    "Expected-label IDs absent from the mock trajectories: "
-    + (", ".join(missing_ids) if missing_ids else "None"),
-    "",
-    "This is a fixture evaluation, not the final injected-drift "
-    "macro-F1 measurement.",
-]
+def main() -> None:
+    battery = evaluate_battery()
+    field = evaluate_field()
+    write_report(battery, field)
 
-md_path = ROOT / "classifier" / "confusion_matrix.md"
-md_path.write_text("\n".join(report) + "\n", encoding="utf-8")
+    print(f"battery: n={battery['n']} accuracy={battery['accuracy']:.4f} "
+          f"macro_f1={battery['macro_f1']:.4f}")
+    if field.get("available"):
+        print(f"field:   n={field['n']} accepted={field['accepted_share']:.4f} "
+              f"residual={field['residual_share']:.4f}")
+    print("wrote classifier/confusion_matrix.md")
 
-print(f"Trajectories evaluated: {len(rows)}")
-print(f"Accuracy: {accuracy:.4f}")
-print(f"Macro-F1 (represented classes): {macro_f1:.4f}")
-print(f"Missing expected-label entries: {len(missing_ids)}")
-print(f"Classes without fixture coverage: {', '.join(unrepresented)}")
-print(f"Saved: {md_path}")
-print(f"Saved: {csv_path}")
+
+if __name__ == "__main__":
+    main()

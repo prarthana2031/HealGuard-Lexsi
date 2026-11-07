@@ -1,0 +1,32 @@
+{
+  "clean": {
+    "n": 20,
+    "task_success": 1.0,
+    "drop_vs_clean": 0.0,
+    "meets_20_point_bar": true
+  },
+  "D1": {
+    "n": 20,
+    "task_success": 0.6,
+    "drop_vs_clean": 0.4,
+    "meets_20_point_bar": true
+  },
+  "D2": {
+    "n": 20,
+    "task_success": 0.6,
+    "drop_vs_clean": 0.4,
+    "meets_20_point_bar": true
+  },
+  "D3": {
+    "n": 20,
+    "task_success": 0.6,
+    "drop_vs_clean": 0.4,
+    "meets_20_point_bar": true
+  },
+  "D4": {
+    "n": 20,
+    "task_success": 0.6,
+    "drop_vs_clean": 0.4,
+    "meets_20_point_bar": true
+  }
+}

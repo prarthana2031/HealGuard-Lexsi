@@ -1,0 +1,30 @@
+{
+  "always-none": {
+    "n": 20,
+    "task_success": 0.6,
+    "success_on_none": 1.0,
+    "success_on_vulnerable": 0.0,
+    "balanced_success": 0.5
+  },
+  "always-all": {
+    "n": 20,
+    "task_success": 0.0,
+    "success_on_none": 0.0,
+    "success_on_vulnerable": 0.0,
+    "balanced_success": 0.0
+  },
+  "finish-immediately": {
+    "n": 20,
+    "task_success": 0.6,
+    "success_on_none": 1.0,
+    "success_on_vulnerable": 0.0,
+    "balanced_success": 0.5
+  },
+  "repeat-one-call": {
+    "n": 20,
+    "task_success": 0.6,
+    "success_on_none": 1.0,
+    "success_on_vulnerable": 0.0,
+    "balanced_success": 0.5
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "battery": {
+    "n": 112,
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "per_class": [
+      {
+        "label": "env_error",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "drift_mismatch",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 32
+      },
+      {
+        "label": "schema_violation",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "wrong_tool",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "wrong_order",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "premature_finish",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "ungrounded_answer",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "loop_collapse",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "redundant_call",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "unrecovered_error",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      },
+      {
+        "label": "residual",
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 8
+      }
+    ]
+  },
+  "field": {
+    "available": true,
+    "n": 80,
+    "per_drift": {
+      "D1": {
+        "n": 20,
+        "labels": {
+          "schema_violation": 20
+        },
+        "accepted_share": 1.0
+      },
+      "D2": {
+        "n": 20,
+        "labels": {
+          "schema_violation": 20
+        },
+        "accepted_share": 0.0
+      },
+      "D3": {
+        "n": 20,
+        "labels": {
+          "schema_violation": 20
+        },
+        "accepted_share": 1.0
+      },
+      "D4": {
+        "n": 20,
+        "labels": {
+          "schema_violation": 20
+        },
+        "accepted_share": 0.0
+      }
+    },
+    "residual_share": 0.0,
+    "accepted_share": 0.5
+  }
+}

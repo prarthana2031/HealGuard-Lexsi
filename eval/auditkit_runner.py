@@ -88,6 +88,10 @@ def evaluate_trajectories(
     looping_trajectories = 0
     loop_applicable_trajectories = 0
 
+    tool_selection_scores: list[float] = []
+    arg_valid_calls = 0
+    arg_total_calls = 0
+
     for trajectory in trajectories:
 
         # Convert the trajectory into an AuditKIT sample.
@@ -141,6 +145,15 @@ def evaluate_trajectories(
         total_tool_calls += total
         total_redundant_calls += redundant
 
+        selection = scores["tool_selection_acc"]
+        if not selection.metadata.get("not_applicable"):
+            tool_selection_scores.append(selection.value)
+
+        arguments = scores["arg_accuracy"]
+        if not arguments.metadata.get("not_applicable"):
+            arg_valid_calls += int(arguments.metadata["valid_calls"])
+            arg_total_calls += int(arguments.metadata["total_calls"])
+
         # Loop detection using AuditKIT's result.
         loop_score = scores["loop_rate"]
 
@@ -174,6 +187,18 @@ def evaluate_trajectories(
     steps_on_success = (
         statistics.median(successful_steps_list)
         if successful_steps_list
+        else None
+    )
+
+    tool_selection_acc = (
+        statistics.mean(tool_selection_scores)
+        if tool_selection_scores
+        else None
+    )
+
+    arg_accuracy = (
+        arg_valid_calls / arg_total_calls
+        if arg_total_calls > 0
         else None
     )
 
@@ -220,6 +245,18 @@ def evaluate_trajectories(
                 "direction": "minimize",
                 "numerator": successful_steps,
                 "denominator": successful_trajectories,
+            },
+            "tool_selection_acc": {
+                "value": tool_selection_acc,
+                "direction": "maximize",
+                "numerator": None,
+                "denominator": len(tool_selection_scores),
+            },
+            "arg_accuracy": {
+                "value": arg_accuracy,
+                "direction": "maximize",
+                "numerator": arg_valid_calls,
+                "denominator": arg_total_calls,
             },
         },
     }

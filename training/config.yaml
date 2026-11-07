@@ -1,0 +1,52 @@
+# Training recipe — written 3 Nov, frozen 11 Nov.
+# The authoritative gate numbers live in configs/thresholds.yaml.
+# This file records the SFT/DPO knobs so the article and the code cannot drift.
+
+model:
+  base: CohereLabs/tiny-aya-global      # 3.35B, 8k context, CC-BY-NC-4.0
+  load_in_4bit: true
+  bnb_quant_type: nf4
+  forbidden: [tiny-aya-base, tiny-aya-fire, tiny-aya-water, tiny-aya-earth, aya-expanse-8b, aya-expanse-32b]
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: all-linear            # S2 found the linear modules; all-linear works for Cohere2
+  bias: none
+
+sft_v0:
+  data: data/train_clean/expert_traces.jsonl
+  eval: data/dev/expert_traces.jsonl
+  seq_length: 2048                      # never 8192 on a free T4
+  batch_size: 1
+  grad_accum: 8
+  learning_rate: 1.0e-4
+  epochs: 3                             # early-stopped on dev loss
+  assistant_only_loss: true             # loss on assistant tokens only
+  checkpoint_steps: 50
+
+dpo_heal:
+  data: data/heal/dpo_pairs.jsonl
+  learning_rate: 5.0e-5
+  epochs: 1
+  max_length: 2048
+  max_prompt_length: 1536
+  checkpoint_steps: 50
+
+dpo_poisoned:
+  data: data/heal/dpo_pairs_poisoned.jsonl   # 30% of pairs flipped on purpose
+  same_recipe_as: dpo_heal
+
+engine:
+  use_vllm: false                       # Linux+CUDA only; it is how free sessions die
+  dtype: float16                        # T4 has no bf16
+  grad_scaler_fix: cast trainable bf16 tensors to fp32   # see train_dpo.py
+
+measured_in_s2:
+  gpu: Colab T4 16GB
+  peak_memory_gb: 5.13
+  seconds_per_step: 6.1                 # every later step budget is this times a step count
+  trainable_params_m: 30.2
+  stock_template_emits_tool_call: false
+  custom_template_emits_tool_call: true

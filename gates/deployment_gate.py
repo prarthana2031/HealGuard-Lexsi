@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 import random
@@ -123,6 +123,24 @@ def _index_records(
             raise ValueError(
                 f"{label} record {record_id}: family must be one of {FAMILIES}."
             )
+
+        family_success = record.get("family_success")
+        if family_success is not None:
+            if not isinstance(family_success, Mapping):
+                raise ValueError(
+                    f"{label} record {record_id}: family_success must be a mapping."
+                )
+            for name, value in family_success.items():
+                if name not in FAMILIES:
+                    raise ValueError(
+                        f"{label} record {record_id}: family_success has "
+                        f"unknown family {name!r}."
+                    )
+                if not isinstance(value, bool):
+                    raise ValueError(
+                        f"{label} record {record_id}: family_success[{name!r}] "
+                        "must be boolean."
+                    )
 
         grouped[bucket][record_id] = record
 
@@ -259,32 +277,40 @@ def _evaluate_bucket(
         requirement="One-sided paired-bootstrap lower bound must exceed zero.",
     )
 
-    # Family-level regression. Small families are reported but not used
-    # to make a separate family-level pass/fail decision.
+    # Family-level regression.  A record may carry a per-family result
+    # (`family_success`, from a task that audits every family at once) or a
+    # single `family` label (one task per family).  Both reduce to the same
+    # per-family outcome, so a collapse cannot hide inside a blended mean.
     family_counts = Counter()
     family_base = {family: [] for family in FAMILIES}
     family_candidate = {family: [] for family in FAMILIES}
     family_data_complete = True
 
-    for task_id in task_ids:
-        base_family = baseline[task_id].get(
-            "family", baseline[task_id].get("task_family")
-        )
-        candidate_family = candidate[task_id].get(
-            "family", candidate[task_id].get("task_family")
-        )
+    def outcomes(record: Mapping[str, Any]) -> dict[str, bool]:
+        per_family = record.get("family_success")
+        if isinstance(per_family, Mapping) and per_family:
+            return {
+                family: bool(per_family[family])
+                for family in FAMILIES
+                if family in per_family
+            }
+        family = record.get("family", record.get("task_family"))
+        if family in FAMILIES:
+            return {family: bool(record["success"])}
+        return {}
 
-        if (
-            base_family not in FAMILIES
-            or candidate_family not in FAMILIES
-            or base_family != candidate_family
-        ):
+    for task_id in task_ids:
+        base_outcomes = outcomes(baseline[task_id])
+        candidate_outcomes = outcomes(candidate[task_id])
+
+        if not base_outcomes or set(base_outcomes) != set(candidate_outcomes):
             family_data_complete = False
             continue
 
-        family_counts[base_family] += 1
-        family_base[base_family].append(baseline[task_id]["success"])
-        family_candidate[base_family].append(candidate[task_id]["success"])
+        for family, value in base_outcomes.items():
+            family_counts[family] += 1
+            family_base[family].append(value)
+            family_candidate[family].append(candidate_outcomes[family])
 
     if not family_data_complete:
         checks["worst_family_regression"] = _check(
@@ -554,10 +580,41 @@ def evaluate_deployment_gate(
     else:
         status = "PASS"
 
+    # The plan allows exactly three outcomes, and a rejection a person can read
+    # is the moment judges remember.  `status` keeps the internal vocabulary so
+    # existing callers and tests stay valid; `decision` is the published one.
+    decision = {"PASS": "DEPLOY", "FAIL": "REJECT", "BLOCKED": "NEED_MORE_DATA"}[status]
+
+    failed_checks = blockers if blockers else failures
+    if status == "PASS":
+        reason = "Every pre-registered check passed."
+    elif status == "BLOCKED":
+        reason = (
+            "Not enough evidence to decide: "
+            + ", ".join(failed_checks[:5])
+            + (" ..." if len(failed_checks) > 5 else "")
+        )
+    else:
+        reason = (
+            "Rejected because these checks failed: "
+            + ", ".join(failed_checks)
+        )
+
     return {
         "status": status,
+        "decision": decision,
         "passed": status == "PASS",
+        "reason": reason,
+        "failed_checks": failed_checks,
         "buckets": bucket_results,
         "blockers": blockers,
         "failures": failures,
+        "thresholds": {
+            "min_n_per_bucket": thresholds.min_n_per_bucket,
+            "min_gain_task_success": thresholds.min_gain_task_success,
+            "alpha": thresholds.alpha,
+            "worst_family_drop": thresholds.worst_family_drop,
+            "max_steps_multiplier": thresholds.max_steps_multiplier,
+            "max_new_failure_mode_share": thresholds.max_new_failure_mode_share,
+        },
     }

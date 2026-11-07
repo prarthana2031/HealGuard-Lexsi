@@ -1,35 +1,72 @@
-﻿import json
+"""Focused unit tests for individual classifier rules."""
+
+import json
+
 from classifier.rules import classify_trajectory
 
+
 def call(name, args):
-    return "<tool_call>\n" + json.dumps({
-        "name": name, "arguments": args
-    }) + "\n</tool_call>"
+    return "<tool_call>\n" + json.dumps(
+        {"name": name, "arguments": args}
+    ) + "\n</tool_call>"
+
 
 def test_unrecovered_error():
+    """An error followed by the identical call, with every prerequisite met."""
     trajectory = {
-        "task": "Check policy.",
+        "task": "Check ACL.",
         "is_correct": False,
-        "final_answer": "[]",
+        "final_answer": ["bucket-1"],
         "messages": [
-            {"role": "user", "content": "Check policy."},
-            {"role": "assistant", "content": call(
-                "get_bucket_policy", {"bucket": "b1"}
-            )},
-            {"role": "tool", "content": "Error: AccessDenied"},
-            {"role": "assistant", "content": "Access was denied."},
+            {"role": "user", "content": "Check ACL."},
+            {"role": "assistant", "content": call("list_buckets", {})},
+            {"role": "tool", "content": json.dumps({"items": ["bucket-1"]})},
+            {"role": "assistant", "content": call("get_bucket_acl", {"bucket": "bucket-1"})},
+            {"role": "tool", "content": json.dumps({"error": "NoSuchBucket"})},
+            {"role": "assistant", "content": call("get_bucket_acl", {"bucket": "bucket-1"})},
+            {"role": "tool", "content": json.dumps({"error": "NoSuchBucket"})},
+            {"role": "assistant", "content": call("finish", {"answer": ["bucket-1"]})},
+            {"role": "tool", "content": json.dumps({"status": "success"})},
         ],
     }
     assert classify_trajectory(trajectory) == "unrecovered_error"
 
-def test_residual():
+
+def test_genuine_residual():
+    """Valid calls, grounded answer, no repeat, no error — just incomplete."""
     trajectory = {
         "task": "Review cloud posture.",
         "is_correct": False,
-        "final_answer": "[]",
+        "final_answer": ["bucket-2"],
         "messages": [
             {"role": "user", "content": "Review cloud posture."},
-            {"role": "assistant", "content": "I cannot complete the review."},
+            {"role": "assistant", "content": call("list_buckets", {})},
+            {"role": "tool", "content": json.dumps({"items": ["bucket-1", "bucket-2"]})},
+            {"role": "assistant", "content": call("finish", {"answer": ["bucket-2"]})},
+            {"role": "tool", "content": json.dumps({"status": "success"})},
         ],
     }
     assert classify_trajectory(trajectory) == "residual"
+
+
+def test_finish_result_does_not_ground_the_answer():
+    """The finish echo must not be treated as an observation."""
+    trajectory = {
+        "task": "Review cloud posture.",
+        "is_correct": False,
+        "final_answer": ["bucket-that-never-existed"],
+        "messages": [
+            {"role": "user", "content": "Review cloud posture."},
+            {"role": "assistant", "content": call("list_buckets", {})},
+            {"role": "tool", "content": json.dumps({"items": ["bucket-1"]})},
+            {
+                "role": "assistant",
+                "content": call("finish", {"answer": ["bucket-that-never-existed"]}),
+            },
+            {
+                "role": "tool",
+                "content": json.dumps({"answer": ["bucket-that-never-existed"]}),
+            },
+        ],
+    }
+    assert classify_trajectory(trajectory) == "ungrounded_answer"

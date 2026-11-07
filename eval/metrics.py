@@ -332,6 +332,184 @@ def steps_on_success(
 
 
 # ---------------------------------------------------------
+# 6. Tool Selection Accuracy
+# Direction: MAXIMIZE   (diagnostic, not the headline)
+# ---------------------------------------------------------
+
+def _effective_specs(drift: str | None):
+    """Argument specs for the API version this trace ran against."""
+    from heal.drifts.schema_diff import get_schema_diff
+    from world.specs import REQUIRED_ARGS, TOOL_ARG_SPECS
+
+    diff = get_schema_diff(drift)
+    specs = {
+        tool: dict(args) for tool, args in TOOL_ARG_SPECS.items()
+    }
+    required = {tool: set(args) for tool, args in REQUIRED_ARGS.items()}
+
+    if diff is None:
+        return specs, required
+
+    for old_tool, new_tool in diff.renamed_tools.items():
+        if old_tool in specs:
+            specs[new_tool] = specs.pop(old_tool)
+            required[new_tool] = required.pop(old_tool, set())
+
+    for tool, pairs in diff.renamed_args.items():
+        if tool not in specs:
+            continue
+        for old, new in pairs.items():
+            if old in specs[tool]:
+                specs[tool][new] = specs[tool].pop(old)
+            if old in required.get(tool, set()):
+                required[tool].discard(old)
+                required[tool].add(new)
+
+    for tool, names in diff.required_args.items():
+        required.setdefault(tool, set()).update(names)
+
+    return specs, required
+
+
+@ak.scorer(
+    direction=ak.Direction.MAXIMIZE,
+    name="tool_selection_acc",
+)
+def tool_selection_acc(
+    sample: ak.Sample,
+    output: str,
+    context: Any = None,
+) -> ak.Score:
+    """Required tools called, and no tool outside the advertised schema."""
+
+    trajectory = _get_trajectory(sample, context)
+
+    calls = trajectory.get("tool_calls")
+    if not isinstance(calls, list):
+        raise ValueError("Trajectory field 'tool_calls' must be a list.")
+
+    called = [
+        call.get("name")
+        for call in calls
+        if isinstance(call, dict) and call.get("name") != "finish"
+    ]
+
+    required = trajectory.get("required_tools")
+    if not isinstance(required, list):
+        required = [
+            "list_buckets",
+            "get_bucket_acl",
+            "get_bucket_policy",
+            "get_public_access_block",
+            "list_iam_roles",
+            "get_role_policies",
+            "describe_security_groups",
+        ]
+
+    specs, _ = _effective_specs(trajectory.get("drift"))
+    unknown = [name for name in called if name not in specs]
+
+    if unknown:
+        return _score(
+            "tool_selection_acc",
+            0.0,
+            ak.Direction.MAXIMIZE,
+            unknown_tools=unknown,
+            required_tools=list(required),
+        )
+
+    if not required:
+        return _not_applicable(
+            "tool_selection_acc",
+            ak.Direction.MAXIMIZE,
+            "No required tool set for this task.",
+        )
+
+    hit = [name for name in required if name in called]
+    return _score(
+        "tool_selection_acc",
+        len(hit) / len(required),
+        ak.Direction.MAXIMIZE,
+        required_tools=list(required),
+        missing_tools=[name for name in required if name not in called],
+    )
+
+
+# ---------------------------------------------------------
+# 7. Argument Accuracy
+# Direction: MAXIMIZE
+# ---------------------------------------------------------
+
+@ak.scorer(
+    direction=ak.Direction.MAXIMIZE,
+    name="arg_accuracy",
+)
+def arg_accuracy(
+    sample: ak.Sample,
+    output: str,
+    context: Any = None,
+) -> ak.Score:
+    """Calls whose arguments pass the current schema, over all calls."""
+
+    trajectory = _get_trajectory(sample, context)
+
+    calls = trajectory.get("tool_calls")
+    if not isinstance(calls, list):
+        raise ValueError("Trajectory field 'tool_calls' must be a list.")
+
+    if not calls:
+        return _not_applicable(
+            "arg_accuracy",
+            ak.Direction.MAXIMIZE,
+            "No tool calls were attempted.",
+        )
+
+    specs, required = _effective_specs(trajectory.get("drift"))
+    good = 0
+    problems: list[str] = []
+
+    for call in calls:
+        if not isinstance(call, dict):
+            problems.append("call is not an object")
+            continue
+        name = call.get("name")
+        arguments = call.get("arguments", {})
+        if name not in specs:
+            problems.append(f"unknown tool {name!r}")
+            continue
+        if not isinstance(arguments, dict):
+            problems.append(f"{name}: arguments not an object")
+            continue
+        issue = []
+        for arg in required.get(name, set()) - arguments.keys():
+            issue.append(f"missing {arg!r}")
+        for arg, value in arguments.items():
+            if arg not in specs[name]:
+                issue.append(f"unexpected {arg!r}")
+                continue
+            allowed = specs[name][arg]
+            if value is None and type(None) in allowed:
+                continue
+            if isinstance(value, bool) and bool not in allowed:
+                issue.append(f"{arg!r} type")
+            elif not isinstance(value, allowed):
+                issue.append(f"{arg!r} type")
+        if issue:
+            problems.append(f"{name}: " + ", ".join(issue))
+        else:
+            good += 1
+
+    return _score(
+        "arg_accuracy",
+        good / len(calls),
+        ak.Direction.MAXIMIZE,
+        valid_calls=good,
+        total_calls=len(calls),
+        problems=problems[:10],
+    )
+
+
+# ---------------------------------------------------------
 # Trajectory Adapter
 # ---------------------------------------------------------
 
@@ -410,7 +588,7 @@ def trajectory_to_sample(
 
 
 # ---------------------------------------------------------
-# Export all five scorers
+# Export all seven scorers
 # ---------------------------------------------------------
 
 METRICS = [
@@ -419,4 +597,6 @@ METRICS = [
     redundant_rate,
     loop_rate,
     steps_on_success,
+    tool_selection_acc,
+    arg_accuracy,
 ]

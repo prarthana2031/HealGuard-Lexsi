@@ -1,0 +1,23 @@
+{
+  "drift": "D1",
+  "source": "simulator",
+  "generated_by": "heal.examples",
+  "template_id": "custom_tool_call_v1",
+  "min_per_label": 8,
+  "max_per_template": 40,
+  "candidate_failures": 100,
+  "skipped_without_divergence": 0,
+  "skipped_without_replay": 57,
+  "capped_by_template": 3,
+  "pairs": 40,
+  "clean_mix": 26,
+  "clean_mix_share": 0.3939393939393939,
+  "label_counts": {
+    "drift_mismatch": 40
+  },
+  "claimed_labels": [
+    "drift_mismatch"
+  ],
+  "all_chosen_replay_to_1": true,
+  "poisoned_rows": 40
+}
