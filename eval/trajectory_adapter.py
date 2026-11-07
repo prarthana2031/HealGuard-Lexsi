@@ -6,6 +6,7 @@ import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from classifier.rules import classify_trajectory
 
 
 TOOL_SCHEMAS = {
@@ -118,26 +119,41 @@ def _is_valid_call(call: dict[str, Any]) -> bool:
     return True
 
 
+
 def adapt_trajectory(raw: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a raw trajectory while preserving gate-relevant metadata."""
+
     messages = raw.get("messages")
 
     if not isinstance(messages, list):
         raise ValueError("Trajectory messages must be a list.")
 
+    task_id = raw.get("task_id", raw.get("id"))
+
+    if task_id is None or not str(task_id).strip():
+        raise ValueError("Trajectory is missing task_id or id.")
+
     user_messages = [
         message.get("content", "")
         for message in messages
-        if message.get("role") == "user"
+        if isinstance(message, dict) and message.get("role") == "user"
     ]
 
     if not user_messages:
-        raise ValueError(f"{raw.get('task_id')}: missing user message")
+        raise ValueError(f"{task_id}: missing user message")
+
+    success = raw.get("is_correct", raw.get("success"))
+
+    if not isinstance(success, bool):
+        raise ValueError(
+            f"{task_id}: is_correct or success must be boolean."
+        )
 
     calls = _extract_tool_calls(messages)
-
     valid_calls = sum(_is_valid_call(call) for call in calls)
 
     signatures = []
+
     for call in calls:
         if isinstance(call, dict) and isinstance(call.get("arguments"), dict):
             signature = (
@@ -153,18 +169,37 @@ def adapt_trajectory(raw: dict[str, Any]) -> dict[str, Any]:
     counts = Counter(signatures)
     redundant_calls = sum(count - 1 for count in counts.values())
 
+    # Preserve an existing failure label; otherwise use Person C's classifier.
+    if success:
+        failure_mode = None
+    else:
+        failure_mode = raw.get("failure_mode")
+
+        if not isinstance(failure_mode, str) or not failure_mode.strip():
+            failure_mode = classify_trajectory({
+                **raw,
+                "success": False,
+            })
+
+    # Preserve family information without inventing a family.
+    family = raw.get("family")
+
+    if family is None:
+        family = raw.get("task_family")
+
     return {
-        "id": str(raw["task_id"]),
+        "id": str(task_id),
         "seed": raw.get("seed"),
-        "split": raw.get("split"),
-        "task": user_messages[-1],
+        "split": raw.get("split", raw.get("bucket")),
+        "family": family,
+        "task": raw.get("task", user_messages[-1]),
         "messages": messages,
         "tool_calls": calls,
-        "reward": 1.0 if raw.get("is_correct") is True else 0.0,
-        "success": raw.get("is_correct"),
+        "reward": 1.0 if success else 0.0,
+        "success": success,
         "num_steps": len(calls),
-        "template_id": "custom_tool_call_v1",
-        "error": None,
+        "template_id": raw.get("template_id", "custom_tool_call_v1"),
+        "error": raw.get("error"),
         "valid_tool_calls": valid_calls,
         "total_tool_calls": len(calls),
         "redundant_calls": redundant_calls,
@@ -173,8 +208,10 @@ def adapt_trajectory(raw: dict[str, Any]) -> dict[str, Any]:
             for call in calls
             if isinstance(call, dict)
         ),
+        "failure_mode": failure_mode,
         "final_answer": raw.get("final_answer"),
     }
+
 
 
 def adapt_jsonl(
