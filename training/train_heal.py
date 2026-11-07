@@ -79,11 +79,12 @@ def main():
     # Initialize the DPOTrainer
     trainer = DPOTrainer(
         model=model,
-        ref_model=None, # TRL automatically uses the base model as reference for PEFT
+        ref_model=None, 
         args=args,
         train_dataset=dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer, # <--- FIXED HERE
     )
+
 
     # Apply the T4 fp32 GradScaler fix
     if args.fp16 and not args.bf16:

@@ -85,7 +85,8 @@ def main():
         per_device_train_batch_size=1,
         gradient_accumulation_steps=8,
         learning_rate=1e-4,
-        num_train_epochs=3,            # Max epochs, but early stopping will cut this short
+        # max_steps=10,
+        num_train_epochs=3,                        # Max epochs, but early stopping will cut this short
         max_length=2048,
         assistant_only_loss=False,
         gradient_checkpointing=True,

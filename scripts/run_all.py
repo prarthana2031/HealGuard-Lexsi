@@ -4,15 +4,14 @@ import sys
 import json
 import os
 
-# Import Person C's gate function
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from gates.deployment_gate import evaluate_deployment_gate
 
 def run_script(script_path, description):
-    print(f"\n{'='*50}\n {description}...\n{'='*50}")
+    print(f"\n{'='*50}\n🚀 {description}...\n{'='*50}")
     result = subprocess.run([sys.executable, script_path], capture_output=False)
     if result.returncode != 0:
-        print(f" Error in {script_path}")
+        print(f"❌ Error in {script_path}")
         sys.exit(1)
 
 def load_records(filepath):
@@ -30,11 +29,10 @@ def main():
         run_script("training/train_poisoned.py", "Training v1_poisoned Adapter")
         
     if args.stage in ["all", "gate"]:
-        print(f"\n{'='*50}\n Running HealGate Evaluation...\n{'='*50}")
+        print(f"\n{'='*50}\n🛡️ Running HealGate Evaluation...\n{'='*50}")
         
-        # These paths will depend on where Person C puts the eval outputs
-        # I am assuming she creates these files
-        baseline_path = "eval/results/baseline_records.jsonl"
+        # We will update these paths once Person C generates the records
+        baseline_path = "eval/results/untuned_baseline_adapted.jsonl"
         candidate_path = "eval/results/v1_good_records.jsonl"
         
         if os.path.exists(baseline_path) and os.path.exists(candidate_path):
