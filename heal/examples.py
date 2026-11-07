@@ -48,6 +48,7 @@ from classifier.rules import classify  # noqa: E402
 from expert.scripted import (  # noqa: E402
     TEMPLATE_ID,
     TraceBuilder,
+    render_call,
     run_expert,
     system_prompt_for,
     family_success,
@@ -71,16 +72,6 @@ SIM_SEEDS = range(8000, 8100)
 # ---------------------------------------------------------------------------
 # Failure sources
 # ---------------------------------------------------------------------------
-
-def _assistant_positions(messages: list[dict[str, Any]]) -> list[int]:
-    positions = []
-    for index, message in enumerate(messages):
-        if message.get("role") == "assistant" and "<tool_call>" in (
-            message.get("content") or ""
-        ):
-            positions.append(index)
-    return positions
-
 
 def stale_agent_trace(seed: int, drift: str) -> dict[str, Any]:
     """The same stale v0 policy the gate baseline uses.
@@ -136,8 +127,78 @@ def load_rollouts(drift: str) -> list[dict[str, Any]]:
 # Pair construction
 # ---------------------------------------------------------------------------
 
+def _render_side(
+    seed: int,
+    drift: str,
+    calls: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Canonical messages for a call sequence, executing each call for real.
+
+    The pair is rebuilt from *calls*, never from the model's raw text.  A real
+    rollout contains whatever whitespace and prose the model happened to emit,
+    so requiring the failure's messages to be byte-identical to the expert's
+    (the previous approach) rejected essentially every real pair.  The lesson we
+    want the adapter to learn is the action at the first bad step, not the
+    model's spacing.
+    """
+    snapshot = generate_snapshot(seed)
+    env, schemas = build_runtime(CloudEnv(snapshot), drift=drift)
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt_for(schemas)},
+        {"role": "user", "content": "Find all vulnerable cloud resources."},
+    ]
+
+    for call in calls:
+        name = call.get("name")
+        arguments = call.get("arguments", {})
+        messages.append(
+            {"role": "assistant", "content": render_call(name, arguments)}
+        )
+
+        if name == "finish":
+            answer = arguments.get("answer") if isinstance(arguments, dict) else []
+            messages.append(
+                {
+                    "role": "tool",
+                    "content": json.dumps(
+                        {
+                            "status": "success",
+                            "answer": answer if isinstance(answer, list) else [],
+                        },
+                        default=str,
+                    ),
+                }
+            )
+            continue
+
+        function = getattr(env, name, None)
+        if callable(function):
+            try:
+                result = function(**arguments)
+            except TypeError as exc:
+                result = {"error": f"schema_violation: {exc}"}
+        else:
+            result = {"error": f"unknown_tool: Tool {name!r} not found"}
+
+        messages.append({"role": "tool", "content": json.dumps(result, default=str)})
+
+    return messages
+
+
 def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
-    """A minimal-edit pair sharing every message up to the first bad step."""
+    """A minimal-edit pair sharing every message up to the first bad step.
+
+    Both sides are rendered canonically from their call sequences, so the shared
+    prefix is guaranteed rather than hoped for, and the pair differs only at the
+    first step where the two sequences disagree.
+    """
+
+    # A prompt-hinted run starts from a different system prompt than the expert's
+    # canonical one, so a pair built from it would silently mix conditions. The
+    # prompt-only arm is a control, not training data.
+    if failure.get("prompt_variant", "clean") != "clean":
+        return None
 
     seed = failure["seed"]
     snapshot = generate_snapshot(seed)
@@ -145,14 +206,11 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
     chosen_trace = run_expert(snapshot, drift=drift)
     chosen_replay = replay(snapshot, chosen_trace["tool_calls"], drift)
 
-    failure_positions = _assistant_positions(failure["messages"])
-    chosen_positions = _assistant_positions(chosen_trace["messages"])
-
-    if not failure_positions:
-        return None
-
     failure_calls = failure.get("tool_calls") or []
     chosen_calls = chosen_trace["tool_calls"]
+
+    if not failure_calls:
+        return None
 
     # First step where the two call sequences disagree.
     divergence = None
@@ -164,16 +222,13 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
     if divergence is None:
         return None
 
-    if divergence >= len(failure_positions) or divergence >= len(chosen_positions):
-        return None
+    chosen_messages = _render_side(seed, drift, chosen_calls)
+    rejected_messages = _render_side(seed, drift, failure_calls)
 
-    prefix = failure["messages"][: failure_positions[divergence]]
-
-    if prefix != chosen_trace["messages"][: failure_positions[divergence]]:
-        return None  # the traces were not comparable; never force a pair
-
-    rejected_messages = failure["messages"][failure_positions[divergence]:]
-    chosen_messages = chosen_trace["messages"][chosen_positions[divergence]:]
+    # Two messages per call (assistant + tool), plus system and user.
+    prefix_length = 2 + 2 * divergence
+    if chosen_messages[:prefix_length] != rejected_messages[:prefix_length]:
+        return None  # the runs were not comparable; never force a pair
 
     rejected_replay = replay(snapshot, failure_calls, drift)
 
@@ -185,9 +240,9 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
     classification = classify(failure)
 
     return {
-        "prompt": prefix,
-        "chosen": chosen_messages,
-        "rejected": rejected_messages,
+        "prompt": chosen_messages[:prefix_length],
+        "chosen": chosen_messages[prefix_length:],
+        "rejected": rejected_messages[prefix_length:],
         "provenance": {
             "source_run": failure.get("task_id"),
             "source": failure.get("source"),
@@ -197,6 +252,7 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
             "seed": seed,
             "divergence_step": divergence,
             "template_id": failure.get("template_id", TEMPLATE_ID),
+            "prompt_variant": failure.get("prompt_variant", "clean"),
             "replay_hash": hashlib.sha256(
                 json.dumps(chosen_trace["tool_calls"], sort_keys=True).encode()
             ).hexdigest()[:16],

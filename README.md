@@ -96,10 +96,34 @@ Individual stages: `--stage drift | detect | classify | generate | retrain | gat
 `--stage report` reads cached artifacts only, which is what Friday's fresh-clone
 check uses.
 
+### Running a model (the prompt-only control lives here)
+
+```bash
+# v0 on the D1 bucket, gate-ready records + full trajectories
+python -m eval.rollout --adapter adapters/v0/final --bucket drift_targeted --tag v0
+
+# the control: same adapter, same seeds, one extra sentence naming bucket_name
+python -m eval.rollout --adapter adapters/v0/final --bucket drift_targeted \
+    --tag v0 --prompt-only-control
+
+# how much does each drift cost this model on the same clean tasks?
+python -m eval.rollout --adapter adapters/v0/final --bucket dev \
+    --tag v0 --drift-override all
+```
+
+`--prompt-only-control` runs the clean prompt and the D1 hint on the same tasks
+and prints the delta. The five prompt arms are one sentence each, defined in
+[`eval/rollout.py`](eval/rollout.py); nothing else changes. `--drift-override all`
+forces the model onto clean then D1–D4 over the same seeds and prints the
+damage table with drop and the 20-point bar — that is the Block 3 exit measured
+on the model. `--compare-to artifacts/runs/v0` gates the new run against a
+baseline and logs the decision. `--trajectories-dir data/drift_train` writes the
+failures where the healer looks for them.
+
 ### Tests
 
 ```bash
-python -m pytest -q     # 149 passed, GPU-free
+python -m pytest -q     # 175 passed, GPU-free
 ```
 
 The central assertion is

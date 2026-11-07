@@ -180,19 +180,6 @@ class TestAuditKitRunner(unittest.TestCase):
             result["metrics"]["steps_on_success"]["value"],
             4.0,
         )
-    def test_steps_on_success_uses_median(self):
-        trajectories = [
-            self.make_trajectory("t1", True, 1, 1, 0, 2),
-            self.make_trajectory("t2", True, 1, 1, 0, 4),
-            self.make_trajectory("t3", True, 1, 1, 0, 100),
-        ]
-
-        result = evaluate_trajectories(trajectories)
-
-        self.assertEqual(
-            result["metrics"]["steps_on_success"]["value"],
-            4.0,
-        )
 
 
 if __name__ == "__main__":

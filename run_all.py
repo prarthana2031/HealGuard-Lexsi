@@ -597,10 +597,6 @@ def main() -> None:
     for name in stages:
         banner(f"{name}")
         STAGES[name]()
-        if args.stage == "all" and name == "drift":
-            # `detect` needs the drift records that were just written.
-            pass
-
     banner("done")
     if args.stage in {"all", "report"}:
         print(f"  main table: {ARTIFACTS / 'results.md'}")

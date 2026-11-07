@@ -40,12 +40,22 @@ def system_prompt_for(schemas: list[dict[str, str]]) -> str:
     )
 
 
-def _call(name: str, arguments: dict[str, Any]) -> str:
+def render_call(name: str, arguments: dict[str, Any]) -> str:
+    """The canonical assistant turn for one tool call.
+
+    One renderer for the expert, the rollout harness and the example generator.
+    DPO pairs are built from *calls*, not from raw model text, so this has to be
+    the only spelling of a call in the codebase.
+    """
     return (
         "<tool_call>\n"
         + json.dumps({"name": name, "arguments": arguments})
         + "\n</tool_call>"
     )
+
+
+def _call(name: str, arguments: dict[str, Any]) -> str:
+    return render_call(name, arguments)
 
 
 def family_of(resource_id: str) -> str:

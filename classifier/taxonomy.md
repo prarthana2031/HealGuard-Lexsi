@@ -41,8 +41,12 @@ The following priority order is mandatory:
 ## 4. Classification Rules
 
 - Classification must be rule-based.
-- The first matching category in the priority order takes precedence.
-- Each trajectory receives exactly one primary failure label.
+- The first matching category in the priority order takes precedence and becomes
+  the **primary** label.
+- Every category that also matched is kept and reported alongside the primary.
+  A drifted call is usually both `drift_mismatch` and `schema_violation`, and
+  hiding the second one loses the evidence that the fix is the same step with
+  valid arguments.
 - The priority order must remain consistent across evaluation runs.
 - `residual` serves as the fallback category for failures not covered by the first ten labels.
 - Residual failures must only be counted and must never be sent to an LLM.

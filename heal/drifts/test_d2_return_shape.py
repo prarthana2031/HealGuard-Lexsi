@@ -1,4 +1,4 @@
-﻿from world.tools import CloudEnv
+from world.tools import CloudEnv
 from heal.drifts.d2_return_shape import apply_d2, TOOL_SCHEMAS_D2
 
 
@@ -50,15 +50,16 @@ def test_d2_preserves_underlying_schema_errors():
     assert "schema_violation" in result["error"]
 
 
-def test_d2_preserves_finished_environment_errors():
+def test_d2_passes_through_the_post_finish_ignore_payload():
+    """D2 must not try to unwrap a payload that has no `items` key."""
     env = make_env()
     drift = apply_d2(env)
     drift.finish([])
 
     result = drift.list_buckets()
 
-    assert "error" in result
-    assert "env_error" in result["error"]
+    assert result.get("ignored") is True
+    assert "error" not in result
 
 
 def test_d2_updates_model_tool_description():

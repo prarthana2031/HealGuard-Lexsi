@@ -60,12 +60,43 @@ def test_pagination():
 def test_structured_errors():
     snap = generate_snapshot(1)
     env = CloudEnv(snap)
-    
+
     res = env.list_buckets(limit="five")
     assert "error" in res
     assert "schema_violation" in res["error"]
-    
+
+
+def test_calls_after_finish_are_ignored_not_environment_errors():
+    """The plan says ignored and flagged — not `env_error`.
+
+    `env_error` is reserved for injected 5xx/timeout. Labelling a post-finish
+    call as one used to send it to the wrong place in the training pool.
+    """
+    env = CloudEnv(generate_snapshot(1))
     env.finish([])
+
     res = env.list_buckets()
-    assert "error" in res
-    assert "env_error" in res["error"]
+    assert res.get("ignored") is True
+    assert "error" not in res
+    assert env.ignored_calls == 1
+
+    # A second finish must not overwrite the first answer.
+    again = env.finish(["something-else"])
+    assert again.get("ignored") is True
+    assert env.ignored_calls == 2
+
+
+def test_tool_output_is_capped():
+    snapshot = {
+        "seed": 0,
+        "buckets": [],
+        "roles": [],
+        "security_groups": [
+            {"id": f"sg-0-{i}", "ingress": [{"port": 443, "cidr": "10.0.0.0/8"}]}
+            for i in range(40)
+        ],
+    }
+    res = CloudEnv(snapshot).describe_security_groups()
+
+    assert len(res["security_groups"]) == 25
+    assert res["truncated_items"] == 15

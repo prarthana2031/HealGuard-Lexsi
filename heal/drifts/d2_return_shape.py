@@ -1,4 +1,4 @@
-﻿"""D2: rename list_buckets response fields while preserving pagination."""
+"""D2: rename list_buckets response fields while preserving pagination."""
 
 from world.tools import CloudEnv, TOOL_SCHEMAS
 
@@ -23,8 +23,9 @@ class D2DriftEnv(CloudEnv):
             next_token=next_token,
         )
 
-        # Preserve structured errors from the underlying environment.
-        if "error" in result:
+        # Preserve structured errors *and* the post-finish ignore payload from
+        # the underlying environment; neither has an `items` key.
+        if "error" in result or "ignored" in result:
             return result
 
         return {

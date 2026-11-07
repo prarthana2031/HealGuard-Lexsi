@@ -34,10 +34,15 @@ from classifier.rules import PRIORITY, classify  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 BATTERY = ROOT / "classifier" / "fixtures" / "failure_battery.jsonl"
-# World v1 rollouts, archived. The classifier reads traces, not worlds, so this
-# is still valid evidence — but it is not a world-v2 model number and the report
-# says so.
-FIELD = ROOT / "data" / "archive" / "world_v1" / "v0_failed_rollouts.jsonl"
+
+# The "field" number scores real model failures. It prefers v2 rollouts as soon
+# as they exist, and falls back to the archived world-v1 probe. The classifier
+# reads traces, not worlds, so the v1 rows are still valid evidence — but they
+# are labelled, because they are not a world-v2 model result.
+FIELD_DIRS = (
+    ROOT / "data" / "drift_train",
+    ROOT / "data" / "archive" / "world_v1",
+)
 
 # What the plan says each injected drift should look like.  Used only to decide
 # whether the classifier's label is one of the accepted labels for that cause.
@@ -132,11 +137,31 @@ def evaluate_battery() -> dict:
     }
 
 
+def _field_source() -> tuple[Path | None, str]:
+    """First directory that actually holds rollouts, and a label for the report."""
+    for directory in FIELD_DIRS:
+        files = sorted(directory.glob("*.jsonl"))
+        if files:
+            label = (
+                "world v2 model rollouts"
+                if directory == FIELD_DIRS[0]
+                else "world v1 (archived probe)"
+            )
+            return directory, label
+    return None, "none"
+
+
 def evaluate_field() -> dict:
-    if not FIELD.is_file():
+    directory, label = _field_source()
+    if directory is None:
         return {"available": False}
 
-    rows = load(FIELD)
+    rows = []
+    for path in sorted(directory.glob("*.jsonl")):
+        rows.extend(load(path))
+    if not rows:
+        return {"available": False}
+
     per_drift = {}
     residuals = 0
     accepted = 0
@@ -164,6 +189,7 @@ def evaluate_field() -> dict:
     total = len(rows)
     return {
         "available": True,
+        "source": label,
         "n": total,
         "per_drift": per_drift,
         "residual_share": residuals / total if total else 0.0,
@@ -237,9 +263,7 @@ def write_report(battery: dict, field: dict) -> None:
             "cause, so a label counts as accepted when it is one the plan lists ",
             "for that drift.",
             "",
-            "> These rollouts come from **world v1** and are archived. They are kept ",
-            "> because the classifier reads traces, not worlds; they are not a ",
-            "> world-v2 model result.",
+            f"> Source: **{field.get('source', 'unknown')}**.",
             "",
             f"- Trajectories: {field['n']}",
             f"- Accepted-label share: {field['accepted_share']:.4f}",

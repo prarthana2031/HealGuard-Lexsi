@@ -85,6 +85,7 @@
   },
   "field": {
     "available": true,
+    "source": "world v1 (archived probe)",
     "n": 80,
     "per_drift": {
       "D1": {
