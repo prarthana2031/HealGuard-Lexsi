@@ -7,8 +7,8 @@ import json
 # Import Person B's tools
 # (Assuming world/tools.py exists and has a way to get schemas)
 try:
-    from world.tools import get_tool_schemas
-    tools = get_tool_schemas()
+    from world.tools import TOOL_SCHEMAS
+    tools = TOOL_SCHEMAS
 except ImportError:
     print("WARNING: world/tools.py not found. Using mock tool schema.")
     tools = [
@@ -105,6 +105,6 @@ print("========================")
 
 # Check if it parsed
 if "<tool_call>" in response and "list_buckets" in response:
-    print("✅ S2 PASSED: Parseable tool call detected with world/tools.py!")
+    print(" S2 PASSED: Parseable tool call detected with world/tools.py!")
 else:
-    print("❌ S2 FAILED: Model did not emit a parseable tool call.")
+    print(" S2 FAILED: Model did not emit a parseable tool call.")
