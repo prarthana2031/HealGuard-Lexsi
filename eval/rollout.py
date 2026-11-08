@@ -61,7 +61,7 @@ from world.tools import CloudEnv  # noqa: E402
 RUNS = ROOT / "artifacts" / "runs"
 TRAJECTORIES = ROOT / "artifacts" / "trajectories"
 MAX_STEPS = 24
-MAX_NEW_TOKENS = 160
+MAX_NEW_TOKENS = 96
 
 BUCKET_FILES = {
     "drift_targeted": "data/drift_targeted/expert_traces.jsonl",
@@ -104,7 +104,15 @@ class Backend(Protocol):
 
 
 class TransformersBackend:
-    """Base model in 4-bit plus an optional LoRA adapter. Greedy by default."""
+    """Base model in 4-bit plus an optional LoRA adapter. Greedy by default.
+
+    Generation is stopped as soon as a complete `</tool_call>` block appears, and
+    at the turn-end token if the model emits one first. Without that, `generate`
+    happily keeps writing *past* the end of the model's turn — inventing the tool
+    result and the next turn — up to `max_new_tokens` every single step. That is
+    where the time went: a 20-task run at ~16 steps each was spending most of its
+    tokens on hallucinated turns it never used.
+    """
 
     def __init__(
         self,
@@ -114,9 +122,12 @@ class TransformersBackend:
         temperature: float = 0.0,
         max_context: int = 2048,
     ):
+        import time
+
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
+        self.time = time
         self.torch = torch
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.tokenizer.chat_template = TOOL_TEMPLATE
@@ -154,6 +165,37 @@ class TransformersBackend:
         self.max_context = max_context
         self.name = f"transformers:{Path(adapter).name if adapter else 'base'}"
 
+        self.stop_ids = self._stop_token_ids()
+        self.generated_tokens = 0
+        self.seconds = 0.0
+        self.calls = 0
+
+    def _stop_token_ids(self) -> list[int]:
+        """EOS plus the turn-end token, so a finished turn ends the call."""
+        ids = []
+        if self.tokenizer.eos_token_id is not None:
+            ids.append(self.tokenizer.eos_token_id)
+        unk = getattr(self.tokenizer, "unk_token_id", None)
+        for token in ("<|END_OF_TURN_TOKEN|>", "<|END_RESPONSE|>"):
+            token_id = self.tokenizer.convert_tokens_to_ids(token)
+            if token_id is not None and token_id != unk:
+                ids.append(token_id)
+        return sorted(set(ids))
+
+    def _stopping_criteria(self, prompt_length: int):
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
+        backend = self
+
+        class StopOnToolCallEnd(StoppingCriteria):
+            def __call__(self, input_ids, scores, **kwargs):  # noqa: ANN001
+                tail = input_ids[0][-12:]
+                return "</tool_call>" in backend.tokenizer.decode(
+                    tail, skip_special_tokens=True
+                )
+
+        return StoppingCriteriaList([StopOnToolCallEnd()])
+
     def generate(self, messages: list[dict[str, str]], max_new_tokens: int) -> str:
         prompt = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
@@ -164,9 +206,11 @@ class TransformersBackend:
             truncation=True,
             max_length=self.max_context,
         ).to(self.model.device)
+        prompt_length = inputs["input_ids"].shape[1]
 
         sampling = self.temperature > 0
-        with self.torch.no_grad():
+        started = self.time.perf_counter()
+        with self.torch.inference_mode():
             output = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
@@ -174,7 +218,12 @@ class TransformersBackend:
                 temperature=self.temperature if sampling else None,
                 top_p=0.95 if sampling else None,
                 pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.stop_ids or None,
+                stopping_criteria=self._stopping_criteria(prompt_length),
             )
+        self.seconds += self.time.perf_counter() - started
+        self.calls += 1
+        self.generated_tokens += max(0, output[0].shape[0] - prompt_length)
 
         text = self.tokenizer.decode(
             output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
@@ -707,6 +756,20 @@ def main() -> None:
         results[variant] = records
         written[variant] = _output_paths(args.bucket, args.tag, label)[0]
         print_summary(f"summary: {variant}{' @ ' + forced if forced else ''}", summarise(records))
+
+    if getattr(backend, "calls", 0):
+        per_call = backend.seconds / backend.calls
+        rate = backend.generated_tokens / backend.seconds if backend.seconds else 0.0
+        print(
+            f"\n  timing: {backend.calls} generations, "
+            f"{backend.seconds:.0f}s total, {per_call:.2f}s/call, "
+            f"{backend.generated_tokens} tokens, {rate:.1f} tok/s"
+        )
+        print(
+            f"          {backend.generated_tokens / backend.calls:.0f} tokens/call "
+            "(a complete tool call is ~40-60; much more means the model is "
+            "writing past its turn)"
+        )
 
     if args.prompt_only_control and len(results) == 2:
         clean, prompted = results["clean"], results["prompt_only_d1"]

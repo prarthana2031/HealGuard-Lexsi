@@ -182,14 +182,23 @@ if __name__ == "__main__":  # tiny CLI: python -m gates.registry
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["show", "active", "activate", "rollback"])
+    parser.add_argument(
+        "action", choices=["show", "active", "register", "activate", "rollback"]
+    )
     parser.add_argument("name", nargs="?")
+    parser.add_argument("path", nargs="?", help="adapter directory, for register")
+    parser.add_argument("--parent", default=None)
+    parser.add_argument("--notes", default="")
     args = parser.parse_args()
 
     if args.action == "show":
         print(json.dumps(show(), indent=2))
     elif args.action == "active":
         print(active())
+    elif args.action == "register":
+        if not args.name or not args.path:
+            parser.error("register needs a name and a path")
+        print(json.dumps(register(args.name, args.path, parent=args.parent, notes=args.notes), indent=2))
     elif args.action == "activate":
         print(activate(args.name, reason="manual"))
     else:
