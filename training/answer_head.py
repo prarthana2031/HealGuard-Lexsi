@@ -74,51 +74,54 @@ def answer_set(message: dict[str, Any]) -> list[str]:
 # Example construction
 # ---------------------------------------------------------------------------
 
-def bos_prefix(render: Callable[[list[dict[str, Any]]], str]) -> str:
-    """Whatever the template emits before any message (usually the BOS token).
-
-    Taken from the template rather than `tokenizer.bos_token`, so it cannot drift
-    if the tokenizer spells it differently.
-    """
-    try:
-        return render([])
-    except Exception:  # noqa: BLE001 - an empty render is a convenience, not a requirement
-        return ""
-
-
 _SENTINEL = "\u0000ANSWER\u0000"
 
 
-def turn_wrapper(
+def locate_answer(
     render: Callable[[list[dict[str, Any]]], str],
-    bos: str,
+    prompt_messages: list[dict[str, Any]],
+    answer_message: dict[str, Any],
 ) -> tuple[str, str]:
-    """Return (header, suffix) around an assistant turn's content.
+    """Return (everything before the answer content, everything after it).
 
-    The completion must start at the *content*, not at the turn header: at
+    Derived by rendering the **full conversation** with the answer's content
+    replaced by a sentinel, then splitting on the sentinel. That matters: the
+    first version rendered the assistant turn *on its own* and tried to strip a
+    BOS prefix from it, but `apply_chat_template([])` raises on a real tokenizer,
+    so the prefix lookup returned "" and every example ended up with the template
+    preamble twice. Deriving the split from the same render call as the whole
+    conversation makes the preamble appear exactly once, with no BOS guessing.
+
+    The completion therefore starts at the *content*, not the turn header: at
     inference `add_generation_prompt=True` has already emitted
     `<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>`, so supervising
     the header would teach the model to emit a second one.
-
-    Derived by rendering one assistant turn with a sentinel as its content and
-    splitting on it, which keeps this correct for any template.
     """
-    rendered = render([{"role": "assistant", "content": _SENTINEL}])
-    if bos and rendered.startswith(bos):
-        rendered = rendered[len(bos):]
-    header, separator, suffix = rendered.partition(_SENTINEL)
+    probe = {**answer_message, "content": _SENTINEL}
+    rendered = render(prompt_messages + [probe])
+    prefix, separator, suffix = rendered.partition(_SENTINEL)
     if not separator:
         raise RuntimeError(
             "the chat template did not interpolate the assistant content; "
-            "cannot locate the turn header"
+            "cannot locate where the answer starts"
         )
-    return header, suffix
+    return prefix, suffix
+
+
+def _diff_hint(left: str, right: str, width: int = 70) -> str:
+    limit = min(len(left), len(right))
+    index = next((i for i in range(limit) if left[i] != right[i]), limit)
+    start = max(0, index - width // 2)
+    return (
+        f"first difference at char {index}\n"
+        f"    built   ...{left[start:index + width]!r}\n"
+        f"    rendered...{right[start:index + width]!r}"
+    )
 
 
 def build_examples(
     rows: list[dict[str, Any]],
     render: Callable[[list[dict[str, Any]]], str],
-    bos: str | None = None,
     repeat_vulnerable: int = 1,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Split every trace into (prompt, answer) at the last tool result.
@@ -130,12 +133,10 @@ def build_examples(
     `add_generation_prompt=True` leaves it at inference; the completion is the
     answer content plus the end-of-turn tokens and nothing else.
     """
-    prefix = bos if bos is not None else bos_prefix(render)
-    header, suffix = turn_wrapper(render, prefix)
-
     examples: list[dict[str, Any]] = []
     skipped = 0
     parity_failures = 0
+    hints: list[str] = []
 
     for row in rows:
         messages = row.get("messages") or []
@@ -147,12 +148,20 @@ def build_examples(
         prompt_messages = messages[:index]
         answer_message = messages[index]
 
-        prompt = render(prompt_messages) + header
-        completion = answer_message.get("content", "") + suffix
+        prefix, suffix = locate_answer(render, prompt_messages, answer_message)
+        content = answer_message.get("content", "")
+        prompt = prefix
+        completion = content + suffix
 
         # The pair must be exactly what the model would see mid-episode.
-        if prompt + completion != render(prompt_messages + [answer_message]):
+        full = render(prompt_messages + [answer_message])
+        if prompt + completion != full:
             parity_failures += 1
+            if len(hints) < 2:
+                hints.append(
+                    f"  seed {row.get('seed')}: "
+                    + _diff_hint(prompt + completion, full)
+                )
             continue
 
         answer = answer_set(answer_message)
@@ -169,8 +178,8 @@ def build_examples(
     if parity_failures:
         raise RuntimeError(
             f"{parity_failures} examples failed the prompt+completion parity "
-            "check. The template does not concatenate cleanly, so this stage "
-            "would train on a different prompt than inference uses."
+            "check, so this stage would train on a different prompt than "
+            "inference uses.\n" + "\n".join(hints)
         )
 
     if repeat_vulnerable > 1:

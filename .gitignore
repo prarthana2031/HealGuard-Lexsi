@@ -7,3 +7,4 @@ output/
 .env
 artifacts/_test_tmp/
 artifacts/_test_registry/
+*ghcred*
