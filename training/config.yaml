@@ -38,6 +38,22 @@ masking:
   supervised_fraction_expected: 0.35-0.55
   check: python -m training.check_masking    # 30 seconds, run before training
 
+answer_head:
+  # Second SFT stage. Trains the finish turn only, because in a full trace the
+  # answer is ~1 of 15 supervised assistant turns and the [] prior wins.
+  # Same adapter, prompt-completion data, completion_only_loss.
+  init_adapter: adapters/v0/final
+  output: adapters/v0_answer
+  data: data/train_clean/expert_traces.jsonl
+  examples: 400                        # one per trace, 200 none / 200 vulnerable
+  epochs: 3
+  learning_rate: 5.0e-5
+  batch: 2
+  grad_accum: 4
+  prompt: conversation truncated at the last tool result, ends at <|START_RESPONSE|>
+  completion: the finish call + end-of-turn tokens, no turn header
+  check_after_training: tasks_that_called_a_tool must stay at 1.00
+
 dpo_heal:
   data: data/heal/dpo_pairs.jsonl
   learning_rate: 5.0e-5

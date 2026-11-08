@@ -120,10 +120,22 @@ on the model. `--compare-to artifacts/runs/v0` gates the new run against a
 baseline and logs the decision. `--trajectories-dir data/drift_train` writes the
 failures where the healer looks for them.
 
+### If v0 collapses to `always-none`
+
+The answer is one of ~15 supervised turns in a full trace, so the `[]` prior can
+win. A second 3-epoch pass that trains **only** the finish turn fixes it:
+
+```bash
+python -m training.answer_head --dry-run    # verify examples, no GPU
+python -m training.answer_head              # ~5 minutes
+python -m eval.rollout --adapter adapters/v0_answer/final --bucket dev \
+    --tag v0_answer --limit 20
+```
+
 ### Tests
 
 ```bash
-python -m pytest -q     # 183 passed, GPU-free
+python -m pytest -q     # 198 passed, GPU-free
 ```
 
 The central assertion is
