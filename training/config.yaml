@@ -1,5 +1,5 @@
-# Training recipe — written 3 Nov, frozen 11 Nov.
-# The authoritative gate numbers live in configs/thresholds.yaml.
+# Training recipe — written 3 Nov, thresholds frozen 11 Nov.
+# Authoritative gate numbers live in configs/thresholds.yaml.
 # This file records the SFT/DPO knobs so the article and the code cannot drift.
 
 model:
@@ -12,19 +12,31 @@ lora:
   r: 16
   alpha: 32
   dropout: 0.05
-  target_modules: all-linear            # S2 found the linear modules; all-linear works for Cohere2
+  target_modules: all-linear
   bias: none
 
 sft_v0:
   data: data/train_clean/expert_traces.jsonl
   eval: data/dev/expert_traces.jsonl
+  # 400 traces / batch 1 / grad-accum 8 / 5 epochs = 250 optimizer steps.
+  # 100 traces at 3 epochs was 39 steps: enough to learn the call format,
+  # nowhere near enough to learn the decision rule. Measured 0.35 dev success.
+  train_traces: 400
+  inject_error_share: 0.20              # "a few" recovery traces, not all of them
   seq_length: 2048                      # never 8192 on a free T4
   batch_size: 1
   grad_accum: 8
   learning_rate: 1.0e-4
-  epochs: 3                             # early-stopped on dev loss
-  assistant_only_loss: true             # loss on assistant tokens only
+  epochs: 5
+  assistant_only_loss: true             # requires {% generation %} markers
   checkpoint_steps: 50
+  model_selection: task success on dev via eval/rollout.py, never eval_loss
+
+masking:
+  template: training/template.py:TOOL_TEMPLATE
+  markers: "{% generation %} ... {% endgeneration %}" around the assistant span
+  supervised_fraction_expected: 0.35-0.55
+  check: python -m training.check_masking    # 30 seconds, run before training
 
 dpo_heal:
   data: data/heal/dpo_pairs.jsonl
@@ -39,14 +51,24 @@ dpo_poisoned:
   same_recipe_as: dpo_heal
 
 engine:
-  use_vllm: false                       # Linux+CUDA only; it is how free sessions die
+  use_vllm: false
   dtype: float16                        # T4 has no bf16
-  grad_scaler_fix: cast trainable bf16 tensors to fp32   # see train_dpo.py
+  grad_scaler_fix: cast trainable bf16 tensors to fp32
 
 measured_in_s2:
   gpu: Colab T4 16GB
   peak_memory_gb: 5.13
-  seconds_per_step: 6.1                 # every later step budget is this times a step count
+  seconds_per_step: 6.1
   trainable_params_m: 30.2
   stock_template_emits_tool_call: false
   custom_template_emits_tool_call: true
+
+measured_block3_v0:
+  run: world v2, 100 traces, 3 epochs, 39 steps
+  task_success: 0.350
+  success_on_none: 0.650
+  success_on_vulnerable: 0.050
+  median_steps: 17.5
+  tasks_that_called_a_tool: 1.00
+  labels: {premature_finish: 12, residual: 14}
+  diagnosis: format learned, decision rule underfit, loss mask unverified

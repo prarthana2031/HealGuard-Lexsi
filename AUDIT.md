@@ -269,6 +269,51 @@ corrupts the whitespace of a rollout and still expects a pair.
 
 ---
 
+## 5c. Block 3 failure: v0 at 0.35 (8 Nov)
+
+The first world-v2 v0 run scored **0.350** dev task success: `none` 0.650,
+`vulnerable` 0.050, median 17.5 steps, **100% of tasks called a tool**, labels
+`premature_finish` ×12 and `residual` ×14. No `schema_violation`, no
+`ungrounded_answer`, no loops.
+
+That mix says the format transferred and the *decision rule* did not. Three
+causes, found in this order:
+
+**1. The loss mask was never verified, and could not have worked.**
+`assistant_only_loss=True` does not read role names. TRL looks for
+`{% generation %}` markers and, if absent, tries to patch the template by exact
+string match against a hard-coded list of known templates
+(`trl/chat_template_utils.py:952-1024`). Our custom template is not on that list,
+so the run either raised or trained on every token. The token budget of one
+expert trace is **24% system prompt, 30% tool results, 45% assistant**: an
+unmasked run spends most of its gradient reproducing text it cannot predict and
+does not need.
+
+**2. There were 39 optimizer steps.** 100 traces / batch 1 / grad-accum 8 /
+3 epochs = 13 × 3. That is enough to learn a constant format and nowhere near
+enough to learn "PAB overrides ACL, deny overrides allow, wildcard needs both
+fields, risky ports are 22/3389/3306".
+
+**3. Model selection used `eval_loss`.** With an unmasked loss, the best-loss
+checkpoint is the one that best predicts *tool results*, which is not the
+checkpoint that answers correctly.
+
+**4. Every training trace carried a 503.** The plan says "include a *few* traces
+where a tool errors"; all 100 had one. The model learns to re-issue
+`list_buckets` with `limit=5` even when the first call succeeded, which is a
+plausible source of the 17.5 median against the expert's ~14.
+
+Fixes shipped: one template in `training/template.py` with generation markers
+(they emit no text — rendering is byte-identical, asserted in
+`training/test_template.py`); a 30-second `python -m training.check_masking`
+that aborts on a fraction near 0 or 1 and on a span without `<tool_call>`;
+`train_v0.py` takes `--epochs`/`--lr`/`--max-steps`, runs the mask check before
+training, drops loss-based early stopping and saves every 50 steps for selection
+by task success; `training/config.yaml` records 400 traces × 5 epochs = 250 steps
+and a 20% error-trace share.
+
+---
+
 ## 6. What only you can do (critical path, 7 days)
 
 In order. Nothing here is optional for a competitive packet.

@@ -123,7 +123,7 @@ failures where the healer looks for them.
 ### Tests
 
 ```bash
-python -m pytest -q     # 175 passed, GPU-free
+python -m pytest -q     # 183 passed, GPU-free
 ```
 
 The central assertion is

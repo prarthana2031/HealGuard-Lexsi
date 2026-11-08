@@ -14,22 +14,7 @@ import json
 import os
 from pathlib import Path
 
-TOOL_TEMPLATE = """{{ bos_token }}
-{%- for message in messages %}
-{%- if message['role'] == 'system' %}
-<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>
-{%- elif message['role'] == 'user' %}
-<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{{ message['content'] }}<|END_OF_TURN_TOKEN|>
-{%- elif message['role'] == 'assistant' %}
-<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>{{ message['content'] }}<|END_RESPONSE|><|END_OF_TURN_TOKEN|>
-{%- elif message['role'] == 'tool' %}
-<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>Tool result: {{ message['content'] }}<|END_OF_TURN_TOKEN|>
-{%- endif %}
-{%- endfor %}
-{%- if add_generation_prompt %}
-<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_RESPONSE|>
-{%- endif %}
-"""
+from training.template import TOOL_TEMPLATE
 
 
 def run_dpo(

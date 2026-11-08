@@ -54,7 +54,7 @@ from expert.scripted import family_success, system_prompt_for  # noqa: E402
 from heal.drifts.registry import build_runtime  # noqa: E402
 from heal.replay import replay  # noqa: E402
 from oracle.checker import check_vulnerabilities  # noqa: E402
-from training.train_dpo import TOOL_TEMPLATE  # noqa: E402
+from training.template import TOOL_TEMPLATE  # noqa: E402
 from world.snapshot import generate_snapshot  # noqa: E402
 from world.tools import CloudEnv  # noqa: E402
 
