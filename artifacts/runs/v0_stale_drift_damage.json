@@ -1,0 +1,27 @@
+{
+  "clean": {
+    "task_success": 0.8,
+    "balanced": 0.8,
+    "drop_vs_clean": 0.0
+  },
+  "D1": {
+    "task_success": 0.5,
+    "balanced": 0.5,
+    "drop_vs_clean": 0.3
+  },
+  "D2": {
+    "task_success": 0.75,
+    "balanced": 0.75,
+    "drop_vs_clean": 0.05
+  },
+  "D3": {
+    "task_success": 0.5,
+    "balanced": 0.5,
+    "drop_vs_clean": 0.3
+  },
+  "D4": {
+    "task_success": 0.7,
+    "balanced": 0.7,
+    "drop_vs_clean": 0.1
+  }
+}
