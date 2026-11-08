@@ -26,8 +26,12 @@ import re
 from collections import Counter
 from typing import Any
 
-from heal.drifts.schema_diff import SchemaDiff, get_schema_diff
-from world.specs import PREREQUISITES, TOOL_ARG_SPECS, check_arguments
+from heal.drifts.schema_diff import (
+    SchemaDiff,
+    effective_specs,
+    get_schema_diff,
+)
+from world.specs import PREREQUISITES
 
 PRIORITY = [
     "env_error",
@@ -282,7 +286,34 @@ def _rule_drift_mismatch(calls, results, answer):
     return False, None, ""
 
 
-def _rule_schema_violation(calls, results, answer):
+def _check_against(specs, required, tool, arguments) -> list[str]:
+    """Strict argument validation against a specific API version."""
+    from world.specs import is_valid_type
+
+    if not isinstance(arguments, dict):
+        return ["arguments must be a JSON object"]
+    if tool not in specs:
+        return []
+
+    problems = []
+    for name in sorted(required.get(tool, set()) - arguments.keys()):
+        problems.append(f"missing required argument {name!r}")
+    for name, value in arguments.items():
+        if name not in specs[tool]:
+            problems.append(f"unexpected argument {name!r}")
+            continue
+        allowed = specs[tool][name]
+        if value is None and type(None) in allowed:
+            continue
+        if not is_valid_type(value, allowed):
+            expected = "/".join(t.__name__ for t in allowed)
+            problems.append(
+                f"argument {name!r} must be {expected}, got {type(value).__name__}"
+            )
+    return problems
+
+
+def _rule_schema_violation(calls, results, answer, specs, required):
     if not calls:
         return True, None, "no parseable tool call was emitted"
 
@@ -293,8 +324,8 @@ def _rule_schema_violation(calls, results, answer):
             return True, call.get("index"), "tool call has no name"
         if not isinstance(call.get("arguments"), dict):
             return True, call.get("index"), "arguments are not an object"
-        if call.get("name") in TOOL_ARG_SPECS:
-            problems = check_arguments(call["name"], call["arguments"])
+        if call.get("name") in specs:
+            problems = _check_against(specs, required, call["name"], call["arguments"])
             if problems:
                 return True, call.get("index"), "; ".join(problems)
 
@@ -306,10 +337,10 @@ def _rule_schema_violation(calls, results, answer):
     return False, None, ""
 
 
-def _rule_wrong_tool(calls, results, answer, task_lower):
+def _rule_wrong_tool(calls, results, answer, task_lower, specs):
     for call in calls:
         name = call.get("name")
-        if isinstance(name, str) and name not in TOOL_ARG_SPECS:
+        if isinstance(name, str) and name not in specs:
             return True, call.get("index"), f"tool {name!r} is not in the schema"
 
     if "list buckets" in task_lower and "list_iam_roles" in {
@@ -507,6 +538,9 @@ def classify(
     task_lower = str(task).lower()
     answer = _answer_of(trajectory, calls)
 
+    drift = trajectory.get("drift")
+    specs, required = effective_specs(drift)
+
     failure = _is_failure(trajectory)
     if failure is False:
         return {
@@ -524,10 +558,13 @@ def classify(
     rules = [
         ("env_error", lambda: _rule_env_error(calls, results, answer)),
         ("drift_mismatch", lambda: _rule_drift_mismatch(calls, results, answer)),
-        ("schema_violation", lambda: _rule_schema_violation(calls, results, answer)),
+        (
+            "schema_violation",
+            lambda: _rule_schema_violation(calls, results, answer, specs, required),
+        ),
         (
             "wrong_tool",
-            lambda: _rule_wrong_tool(calls, results, answer, task_lower),
+            lambda: _rule_wrong_tool(calls, results, answer, task_lower, specs),
         ),
         ("wrong_order", lambda: _rule_wrong_order(calls, results, answer)),
         ("premature_finish", lambda: _rule_premature_finish(calls, results, answer)),

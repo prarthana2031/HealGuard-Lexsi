@@ -537,6 +537,20 @@ def print_summary(title: str, summary: dict[str, Any]) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+def _display(path: Path) -> str:
+    """Relative to the repo when possible, absolute otherwise.
+
+    The old code called `path.relative_to(ROOT)` unconditionally, which raises
+    ValueError when `--trajectories-dir` is a relative path or lives outside the
+    checkout. It crashed after the files were written, which made a successful
+    run look like a failure.
+    """
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _output_paths(
     bucket: str,
     tag: str,
@@ -547,6 +561,8 @@ def _output_paths(
     suffix = "" if variant == "clean" else f"_{variant}"
     records = (records_dir or RUNS) / f"{tag}{suffix}_{bucket}.jsonl"
     directory = trajectories_dir or TRAJECTORIES
+    if not directory.is_absolute():
+        directory = ROOT / directory
     trajectories = directory / f"{tag}{suffix}_{bucket}.jsonl"
     return records, trajectories
 
@@ -607,8 +623,8 @@ def _run_variant(
     )
     _write_jsonl(records_path, records)
     _write_jsonl(trajectories_path, trajectories)
-    print(f"    records     -> {records_path.relative_to(ROOT)}")
-    print(f"    trajectories-> {trajectories_path.relative_to(ROOT)}")
+    print(f"    records     -> {_display(records_path)}")
+    print(f"    trajectories-> {_display(trajectories_path)}")
     return records, trajectories
 
 
@@ -654,6 +670,12 @@ def main() -> None:
              "over the same tasks and prints the damage table (Stage 1.6).",
     )
     parser.add_argument(
+        "--seeds",
+        help="START-END seed range to use instead of a bucket file, e.g. "
+             "30000-30059. Use with --drift-override to make a drift-train set "
+             "that is disjoint from every evaluation bucket.",
+    )
+    parser.add_argument(
         "--sealed-ok",
         action="store_true",
         help="Permit reading the sealed set. The plan opens it once, on 12 Nov.",
@@ -661,7 +683,22 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print the plan and stop.")
     args = parser.parse_args()
 
-    tasks = load_tasks(args.bucket, allow_sealed=args.sealed_ok)
+    if args.seeds:
+        try:
+            start_text, end_text = args.seeds.split("-")
+            start, end = int(start_text), int(end_text)
+        except ValueError as exc:
+            raise SystemExit(f"--seeds must be START-END, got {args.seeds!r}") from exc
+        tasks = [{"seed": seed, "drift": None} for seed in range(start, end + 1)]
+        args.bucket = "drift_train"
+        print(f"seeds {start}-{end} ({len(tasks)} tasks) -> bucket label 'drift_train'")
+        if args.drift_override in (None, "all"):
+            raise SystemExit(
+                "--seeds needs an explicit --drift-override D1..D4 (or clean); "
+                "otherwise the task list has no API version."
+            )
+    else:
+        tasks = load_tasks(args.bucket, allow_sealed=args.sealed_ok)
     if args.limit:
         tasks = tasks[: args.limit]
 

@@ -131,3 +131,41 @@ def get_schema_diff(drift: str | None) -> SchemaDiff | None:
 
 def drift_ids() -> tuple[str, ...]:
     return tuple(SCHEMA_DIFFS)
+
+
+def effective_specs(drift: str | None):
+    """Argument specs for the API version a trace actually ran against.
+
+    Validating a drifted run against the clean specs marks every correct call
+    as a schema violation. That is exactly what happened to v0_answer2: it read
+    `bucket_name` from the tool list, used it 488 times, and the classifier
+    called all of it a violation.
+    """
+    from world.specs import REQUIRED_ARGS, TOOL_ARG_SPECS
+
+    specs = {tool: dict(args) for tool, args in TOOL_ARG_SPECS.items()}
+    required = {tool: set(args) for tool, args in REQUIRED_ARGS.items()}
+
+    diff = get_schema_diff(drift)
+    if diff is None:
+        return specs, required
+
+    for old_tool, new_tool in diff.renamed_tools.items():
+        if old_tool in specs:
+            specs[new_tool] = specs.pop(old_tool)
+            required[new_tool] = required.pop(old_tool, set())
+
+    for tool, pairs in diff.renamed_args.items():
+        if tool not in specs:
+            continue
+        for old, new in pairs.items():
+            if old in specs[tool]:
+                specs[tool][new] = specs[tool].pop(old)
+            if old in required.get(tool, set()):
+                required[tool].discard(old)
+                required[tool].add(new)
+
+    for tool, names in diff.required_args.items():
+        required.setdefault(tool, set()).update(names)
+
+    return specs, required

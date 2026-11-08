@@ -102,14 +102,43 @@ def stale_agent_trace(seed: int, drift: str) -> dict[str, Any]:
     return trace
 
 
-def load_rollouts(drift: str) -> list[dict[str, Any]]:
-    """Every `data/drift_train/*.jsonl` row for this drift.
+EVALUATION_SPLITS = ("dev", "drift_targeted", "gate_regression", "final_sealed")
 
-    World v1 rollouts live in `data/archive/world_v1/` and are deliberately not
-    read here: under world v2 the same seed is a different account, so a v1
-    failure cannot be repaired into a v2 example.
+
+def evaluation_seeds() -> set[int]:
+    """Every seed that belongs to a split we report or select on.
+
+    A training example drawn from these is leakage: the gate would grade the
+    tasks the healer was trained on.
     """
+    ledger_path = ROOT / "data" / "splits" / "seed_ledger.json"
+    if not ledger_path.is_file():
+        return set()
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    seeds = ledger.get("seeds", {})
+    return {
+        seed
+        for split in EVALUATION_SPLITS
+        for seed in seeds.get(split, [])
+    }
+
+
+def load_rollouts(drift: str) -> tuple[list[dict[str, Any]], int]:
+    """Every `data/drift_train/*.jsonl` row for this drift, minus leaked seeds.
+
+    Returns (rows, excluded). World v1 rollouts live in
+    `data/archive/world_v1/` and are deliberately not read here: under world v2
+    the same seed is a different account.
+
+    The leak check is not advisory. On 8 Nov the only rollout file on disk was
+    a drift_targeted run, so 54 of its 60 seeds and *all 11* of its failures
+    were gate-bucket tasks. Training on them would have manufactured the gate's
+    own result.
+    """
+    reserved = evaluation_seeds()
     rows = []
+    excluded = 0
+
     for path in sorted((ROOT / "data" / "drift_train").glob("*.jsonl")):
         with path.open(encoding="utf-8") as file:
             for line in file:
@@ -118,9 +147,13 @@ def load_rollouts(drift: str) -> list[dict[str, Any]]:
                 row = json.loads(line)
                 if row.get("drift") != drift:
                     continue
+                if row.get("seed") in reserved:
+                    excluded += 1
+                    continue
                 row["source"] = f"rollouts:{path.name}"
                 rows.append(row)
-    return rows
+
+    return rows, excluded
 
 
 # ---------------------------------------------------------------------------
@@ -280,8 +313,23 @@ def _dedupe_key(pair: dict[str, Any]) -> str:
 
 
 def build(drift: str, source: str) -> dict[str, Any]:
+    excluded = 0
     if source == "rollouts":
-        failures = load_rollouts(drift)
+        failures, excluded = load_rollouts(drift)
+        if excluded:
+            print(
+                f"  leaked: {excluded} rollout(s) dropped because their seeds "
+                "belong to an evaluation split (dev / drift_targeted / "
+                "gate_regression / sealed). Training on them would grade the "
+                "healer on its own training tasks."
+            )
+        if not failures:
+            raise SystemExit(
+                "no usable rollouts: every row came from an evaluation split.\n"
+                "Generate drift-train rollouts on a reserved seed block instead:\n"
+                "  python -m eval.rollout --adapter <adapter> --seeds 30000-30059 "
+                "--drift-override D1 --tag v0_d1train --trajectories-dir data/drift_train"
+            )
     else:
         failures = [stale_agent_trace(seed, drift) for seed in SIM_SEEDS]
 
@@ -386,6 +434,7 @@ def build(drift: str, source: str) -> dict[str, Any]:
         "min_per_label": MIN_PER_LABEL,
         "max_per_template": MAX_PER_TEMPLATE,
         "candidate_failures": len(failures),
+        "excluded_leaked": excluded,
         "skipped_without_divergence": skipped_no_divergence,
         "skipped_without_replay": skipped_no_replay,
         "capped_by_template": capped_by_template,

@@ -70,3 +70,32 @@ def test_finish_result_does_not_ground_the_answer():
         ],
     }
     assert classify_trajectory(trajectory) == "ungrounded_answer"
+
+
+def _bucket_trace(argument_name, drift):
+    """One bucket read using `argument_name`, run under `drift`."""
+    return {
+        "task": "Find all vulnerable cloud resources.",
+        "drift": drift,
+        "is_correct": False,
+        "final_answer": ["bucket-1"],
+        "messages": [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": call("list_buckets", {})},
+            {"role": "tool", "content": json.dumps({"items": ["bucket-1", "bucket-2"]})},
+            {"role": "assistant", "content": call("get_bucket_acl", {argument_name: "bucket-1"})},
+            {"role": "tool", "content": json.dumps({"acl_public": True})},
+            {"role": "assistant", "content": call("finish", {"answer": ["bucket-1"]})},
+            {"role": "tool", "content": json.dumps({"status": "success"})},
+        ],
+    }
+
+
+def test_drifted_argument_name_is_valid_under_the_drift():
+    """v0_answer2 read `bucket_name` off the tool list; that is not a violation."""
+    assert classify_trajectory(_bucket_trace("bucket_name", "D1")) != "schema_violation"
+
+
+def test_the_same_call_is_a_violation_on_the_clean_api():
+    """The check must still fire when the schema really does say `bucket`."""
+    assert classify_trajectory(_bucket_trace("bucket_name", None)) == "schema_violation"

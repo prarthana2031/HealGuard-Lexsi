@@ -100,6 +100,15 @@ class TestCorrectiveExamples(unittest.TestCase):
         self.assertGreater(flipped, 0)
         self.assertLessEqual(flipped / len(poisoned), 0.35)
 
+    def test_evaluation_seeds_are_known_to_the_leak_guard(self):
+        from heal.examples import evaluation_seeds
+
+        reserved = evaluation_seeds()
+        self.assertTrue(reserved)
+        # the gate bucket and the sealed set must both be protected
+        self.assertIn(6000, reserved)
+        self.assertIn(20000, reserved)
+
     def test_no_sealed_seed_leaks_into_the_heal_set(self):
         sealed = {
             json.loads(line)["seed"]

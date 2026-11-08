@@ -338,37 +338,9 @@ def steps_on_success(
 
 def _effective_specs(drift: str | None):
     """Argument specs for the API version this trace ran against."""
-    from heal.drifts.schema_diff import get_schema_diff
-    from world.specs import REQUIRED_ARGS, TOOL_ARG_SPECS
+    from heal.drifts.schema_diff import effective_specs
 
-    diff = get_schema_diff(drift)
-    specs = {
-        tool: dict(args) for tool, args in TOOL_ARG_SPECS.items()
-    }
-    required = {tool: set(args) for tool, args in REQUIRED_ARGS.items()}
-
-    if diff is None:
-        return specs, required
-
-    for old_tool, new_tool in diff.renamed_tools.items():
-        if old_tool in specs:
-            specs[new_tool] = specs.pop(old_tool)
-            required[new_tool] = required.pop(old_tool, set())
-
-    for tool, pairs in diff.renamed_args.items():
-        if tool not in specs:
-            continue
-        for old, new in pairs.items():
-            if old in specs[tool]:
-                specs[tool][new] = specs[tool].pop(old)
-            if old in required.get(tool, set()):
-                required[tool].discard(old)
-                required[tool].add(new)
-
-    for tool, names in diff.required_args.items():
-        required.setdefault(tool, set()).update(names)
-
-    return specs, required
+    return effective_specs(drift)
 
 
 @ak.scorer(
