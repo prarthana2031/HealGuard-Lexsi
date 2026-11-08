@@ -311,6 +311,34 @@ class TestStaleSchema(unittest.TestCase):
         from classifier.rules import classify
         self.assertEqual(classify(trajectory)["primary"], "drift_mismatch")
 
+    def test_stale_schema_is_a_no_op_on_clean_tasks(self):
+        """No drift means nothing to be stale about; the prompt must not change."""
+        from eval.run_agent import run_stale
+
+        seed = a_vulnerable_seed()
+        calls = run_stale(seed, None)["tool_calls"]
+        responses = [call_text(c["name"], c["arguments"]) for c in calls]
+
+        fresh = run_episode(ScriptedBackend(responses), seed, None, stale_schema=False)
+        stale = run_episode(ScriptedBackend(responses), seed, None, stale_schema=True)
+
+        self.assertEqual(
+            fresh["messages"][0]["content"], stale["messages"][0]["content"]
+        )
+
+    def test_gate_regression_keeps_per_task_drifts(self):
+        """The bucket must not be forced onto one drift.
+
+        Forcing D1 there would relabel its 42 clean tasks as drifted and destroy
+        the regression check, which is what --drift-override D1 would have done
+        before this was per-task.
+        """
+        tasks = load_tasks("gate_regression")
+        drifts = {task["drift"] for task in tasks}
+
+        self.assertIn(None, drifts, "no clean tasks left in gate_regression")
+        self.assertTrue(drifts - {None}, "no drifted tasks left in gate_regression")
+
     def test_the_flag_is_recorded(self):
         seed = a_vulnerable_seed()
         trajectory = run_episode(

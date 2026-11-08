@@ -720,6 +720,22 @@ def main() -> None:
     if args.limit:
         tasks = tasks[: args.limit]
 
+    # A stale description matters per task: on a clean task there is no drift to
+    # be stale about, so gate_regression (42 clean + D2/D3/D4) needs no override
+    # at all. Forcing one there would relabel every clean task as drifted and
+    # silently destroy the regression bucket, which is the opposite of safe.
+    if args.stale_schema and args.drift_override == "clean":
+        raise SystemExit(
+            "--stale-schema with --drift-override clean is a contradiction: a "
+            "stale description only matters when the API underneath it moved."
+        )
+    if args.stale_schema and args.seeds and not args.drift_override:
+        raise SystemExit(
+            "--stale-schema with --seeds needs --drift-override D1..D4: a bare "
+            "seed range has no API version of its own."
+        )
+
+
     print(
         f"bucket={args.bucket}  tasks={len(tasks)}  "
         f"adapter={args.adapter or 'base'}  decoding="
@@ -791,12 +807,6 @@ def main() -> None:
         )
         print(f"\n  wrote {RUNS / f'{args.tag}_drift_damage.json'}")
         return
-
-    if args.stale_schema and (args.drift_override in (None, "clean")):
-        raise SystemExit(
-            "--stale-schema needs a drift: a stale description only matters when "
-            "the API underneath it has moved. Pass --drift-override D1..D4."
-        )
 
     forced = args.drift_override
     for variant in variants:
