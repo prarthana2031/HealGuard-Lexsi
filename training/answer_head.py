@@ -381,14 +381,19 @@ def main() -> None:
 
     steps = int(len(dataset) * args.epochs / (args.batch * args.grad_accum))
     print(f"planned optimizer steps: {steps}")
+
+    # --- FIX: Cast bf16 trainable params to fp32 for fp16 GradScaler ---
+    # Prevents NotImplementedError on T4/A10G GPUs when model is natively bf16
+    n_cast = 0
+    for param in trainer.model.parameters():
+        if param.requires_grad and param.dtype == torch.bfloat16:
+            param.data = param.data.to(torch.float32)
+            n_cast += 1
+    print(f"Cast {n_cast} trainable tensor(s) from bf16 -> fp32 for fp16 GradScaler.")
+    # -------------------------------------------------------------------
+
     trainer.train()
     trainer.save_model(str(ROOT / args.output / "final"))
-    print(f"saved {args.output}/final")
-    print(
-        "next:\n"
-        f"  python -m eval.rollout --adapter {args.output}/final --bucket dev "
-        "--tag v0_answer --limit 20"
-    )
 
 
 if __name__ == "__main__":
