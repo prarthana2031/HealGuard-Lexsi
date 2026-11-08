@@ -264,6 +264,65 @@ class TestTaskLoading(unittest.TestCase):
         self.assertEqual({task["drift"] for task in tasks}, {"D1"})
 
 
+class TestStaleSchema(unittest.TestCase):
+    """The demo drift: a pinned tool registry against a moved API."""
+
+    def test_stale_prompt_advertises_the_old_name(self):
+        from eval.run_agent import run_stale
+
+        seed = a_vulnerable_seed()
+        calls = run_stale(seed, None)["tool_calls"]
+        backend = ScriptedBackend([call_text(c["name"], c["arguments"]) for c in calls])
+
+        fresh = run_episode(
+            ScriptedBackend([call_text(c["name"], c["arguments"]) for c in calls]),
+            seed, None, drift_override="D1", max_steps=30, stale_schema=False,
+        )
+        stale = run_episode(
+            backend, seed, None, drift_override="D1", max_steps=30, stale_schema=True,
+        )
+
+        system_fresh = fresh["messages"][0]["content"]
+        system_stale = stale["messages"][0]["content"]
+        self.assertIn("bucket_name", system_fresh)
+        self.assertNotIn("bucket_name", system_stale)
+        self.assertIn("Args: bucket (str)", system_stale)
+
+    def test_stale_schema_makes_the_old_call_fail(self):
+        from eval.run_agent import run_stale
+
+        seed = a_vulnerable_seed()
+        calls = run_stale(seed, None)["tool_calls"]
+        # the reads fail, so a model that trusts them cannot ground its answer
+        calls = [c for c in calls if c["name"] != "finish"] + [
+            {"name": "finish", "arguments": {"answer": []}}
+        ]
+        trajectory = run_episode(
+            ScriptedBackend([call_text(c["name"], c["arguments"]) for c in calls]),
+            seed, None, drift_override="D1", max_steps=30, stale_schema=True,
+        )
+
+        tool_text = " ".join(
+            message["content"] for message in trajectory["messages"]
+            if message["role"] == "tool"
+        )
+        self.assertIn("unexpected argument", tool_text)
+
+        from classifier.rules import classify
+        self.assertEqual(classify(trajectory)["primary"], "drift_mismatch")
+
+    def test_the_flag_is_recorded(self):
+        seed = a_vulnerable_seed()
+        trajectory = run_episode(
+            ScriptedBackend([call_text("finish", {"answer": []})]),
+            seed, None, drift_override="D1", stale_schema=True,
+        )
+        record = to_record(
+            trajectory, bucket="drift_targeted", tag="v0", variant="clean"
+        )
+        self.assertTrue(record["stale_schema"])
+
+
 class TestHandoffToTheHealer(unittest.TestCase):
     """The rollout output must be usable as DPO training data.
 

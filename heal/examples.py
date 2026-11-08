@@ -57,7 +57,7 @@ from heal.drifts.registry import build_runtime, get_tool_schemas  # noqa: E402
 from heal.replay import replay, replay_trajectory  # noqa: E402
 from oracle.checker import check_vulnerabilities  # noqa: E402
 from world.snapshot import generate_snapshot  # noqa: E402
-from world.tools import CloudEnv  # noqa: E402
+from world.tools import TOOL_SCHEMAS, CloudEnv  # noqa: E402
 
 OUT_DIR = ROOT / "data" / "heal"
 MIN_PER_LABEL = 8
@@ -164,6 +164,7 @@ def _render_side(
     seed: int,
     drift: str,
     calls: list[dict[str, Any]],
+    stale_schema: bool = False,
 ) -> list[dict[str, str]]:
     """Canonical messages for a call sequence, executing each call for real.
 
@@ -177,8 +178,14 @@ def _render_side(
     snapshot = generate_snapshot(seed)
     env, schemas = build_runtime(CloudEnv(snapshot), drift=drift)
 
+    # A pair built from a stale-registry failure must keep the stale description:
+    # the lesson is "call it bucket_name even though the list still says bucket".
+    # Re-rendering with the fresh description would train on a prompt the model
+    # never saw and would not reproduce the failure at inference.
+    prompt_schemas = TOOL_SCHEMAS if stale_schema else schemas
+
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_prompt_for(schemas)},
+        {"role": "system", "content": system_prompt_for(prompt_schemas)},
         {"role": "user", "content": "Find all vulnerable cloud resources."},
     ]
 
@@ -255,8 +262,9 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
     if divergence is None:
         return None
 
-    chosen_messages = _render_side(seed, drift, chosen_calls)
-    rejected_messages = _render_side(seed, drift, failure_calls)
+    stale_schema = bool(failure.get("stale_schema", False))
+    chosen_messages = _render_side(seed, drift, chosen_calls, stale_schema)
+    rejected_messages = _render_side(seed, drift, failure_calls, stale_schema)
 
     # Two messages per call (assistant + tool), plus system and user.
     prefix_length = 2 + 2 * divergence
@@ -286,6 +294,7 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
             "divergence_step": divergence,
             "template_id": failure.get("template_id", TEMPLATE_ID),
             "prompt_variant": failure.get("prompt_variant", "clean"),
+            "stale_schema": stale_schema,
             "replay_hash": hashlib.sha256(
                 json.dumps(chosen_trace["tool_calls"], sort_keys=True).encode()
             ).hexdigest()[:16],

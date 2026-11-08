@@ -56,7 +56,7 @@ from heal.replay import replay  # noqa: E402
 from oracle.checker import check_vulnerabilities  # noqa: E402
 from training.template import TOOL_TEMPLATE  # noqa: E402
 from world.snapshot import generate_snapshot  # noqa: E402
-from world.tools import CloudEnv  # noqa: E402
+from world.tools import TOOL_SCHEMAS, CloudEnv  # noqa: E402
 
 RUNS = ROOT / "artifacts" / "runs"
 TRAJECTORIES = ROOT / "artifacts" / "trajectories"
@@ -296,6 +296,7 @@ def run_episode(
     max_steps: int = MAX_STEPS,
     max_new_tokens: int = MAX_NEW_TOKENS,
     drift_override: str | None = None,
+    stale_schema: bool = False,
 ) -> dict[str, Any]:
     """Generate one full trajectory against the real environment.
 
@@ -311,7 +312,13 @@ def run_episode(
     truth = check_vulnerabilities(snapshot)
     env, schemas = build_runtime(CloudEnv(snapshot), drift=drift)
 
-    system = system_prompt_for(schemas)
+    # The registry the agent carries is a snapshot; the API moved underneath it.
+    # With --stale-schema the prompt keeps the *clean* tool list while the
+    # environment enforces v2 - which is how a real agent actually breaks, and
+    # the only way an instruction-following model can be made to fail on a
+    # rename it could otherwise read off the tool description.
+    prompt_schemas = TOOL_SCHEMAS if stale_schema else schemas
+    system = system_prompt_for(prompt_schemas)
     if prompt_suffix:
         # Any non-canonical system prompt is not the expert's, so the healer must
         # refuse to build a training pair from it. Derive the flag here rather
@@ -426,6 +433,7 @@ def run_episode(
         "split": "rollout",
         "drift": drift,
         "drift_override": drift_override,
+        "stale_schema": stale_schema,
         "task": "Find all vulnerable cloud resources.",
         "template_id": "custom_tool_call_v1",
         "prompt_variant": prompt_variant,
@@ -459,6 +467,7 @@ def to_record(trajectory: dict[str, Any], *, bucket: str, tag: str, variant: str
         "drift": trajectory["drift"] or "clean",
         "policy": tag,
         "prompt_variant": variant,
+        "stale_schema": trajectory.get("stale_schema", False),
         "success": trajectory["success"],
         "num_steps": trajectory["num_steps"],
         "total_tool_calls": trajectory["total_tool_calls"],
@@ -588,6 +597,7 @@ def _run_variant(
     drift_override: str | None = None,
     filename_label: str | None = None,
     records_dir: Path | None = None,
+    stale_schema: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     selected = tasks[:limit] if limit else tasks
     trajectories = []
@@ -603,6 +613,7 @@ def _run_variant(
             max_steps=max_steps,
             max_new_tokens=max_new_tokens,
             drift_override=drift_override,
+            stale_schema=stale_schema,
         )
         trajectories.append(trajectory)
         records.append(
@@ -668,6 +679,13 @@ def main() -> None:
         choices=["clean", "D1", "D2", "D3", "D4", "all"],
         help="Force the API version the model faces. 'all' sweeps clean + D1-D4 "
              "over the same tasks and prints the damage table (Stage 1.6).",
+    )
+    parser.add_argument(
+        "--stale-schema",
+        action="store_true",
+        help="Keep the CLEAN tool description in the system prompt while the "
+             "environment enforces the drifted API. Models the real failure: a "
+             "pinned tool registry against a moved API.",
     )
     parser.add_argument(
         "--seeds",
@@ -752,7 +770,9 @@ def main() -> None:
                 args.max_new_tokens,
                 args.trajectories_dir,
                 drift_override=forced,
-                filename_label=f"{variants[0]}_{forced}",
+                filename_label=f"{variants[0]}_{forced}"
+                + ("_stale" if args.stale_schema else ""),
+                stale_schema=args.stale_schema,
             )
             damage[forced] = summarise(records)
 
@@ -772,10 +792,18 @@ def main() -> None:
         print(f"\n  wrote {RUNS / f'{args.tag}_drift_damage.json'}")
         return
 
+    if args.stale_schema and (args.drift_override in (None, "clean")):
+        raise SystemExit(
+            "--stale-schema needs a drift: a stale description only matters when "
+            "the API underneath it has moved. Pass --drift-override D1..D4."
+        )
+
     forced = args.drift_override
     for variant in variants:
         suffix = PROMPT_VARIANTS[variant] if args.prompt_suffix == "" else args.prompt_suffix
         label = variant if not forced else f"{variant}_{forced}"
+        if args.stale_schema:
+            label = f"{label}_stale"
         records, _trajectories = _run_variant(
             backend,
             tasks,
@@ -789,6 +817,7 @@ def main() -> None:
             args.trajectories_dir,
             drift_override=forced,
             filename_label=label,
+            stale_schema=args.stale_schema,
         )
         results[variant] = records
         written[variant] = _output_paths(args.bucket, args.tag, label)[0]
@@ -847,6 +876,17 @@ def main() -> None:
             with cand_path.open(encoding="utf-8") as file:
                 candidate += [json.loads(line) for line in file if line.strip()]
 
+        ages = {row.get("stale_schema", False) for row in baseline}
+        ages |= {row.get("stale_schema", False) for row in candidate}
+        if len(ages) > 1:
+            print(
+                "\n  gate: refusing to compare a stale-schema run with a "
+                "fresh-schema run. The baseline and the candidate must see the "
+                "same tool description, or the gain measures the prompt rather "
+                "than the retrain."
+            )
+            return
+
         decision = evaluate_deployment_gate(baseline, candidate)
         log_decision(
             decision,
@@ -855,6 +895,7 @@ def main() -> None:
             meta={
                 "adapter": args.adapter,
                 "prompt_variant": gate_variant,
+                "stale_schema": sorted(ages)[0],
                 "candidate_records": str(candidate_prefix.relative_to(ROOT)),
             },
         )

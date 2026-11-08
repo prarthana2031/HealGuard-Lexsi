@@ -314,6 +314,34 @@ and a 20% error-trace share.
 
 ---
 
+## 5d. D1 does not hurt a model that reads its tool list (8 Nov)
+
+v0_answer2 scored **19/30 (0.633) on vulnerable tasks under D1** - a real agent,
+not the canary. But it made **488 of 488** bucket calls with `bucket_name`: it
+read the drifted name off the tool description and complied. Reclassifying its
+11 failures with the drift-aware classifier gives **10 `residual`, 1
+`premature_finish`, 0 `drift_mismatch`** - they are aggregation errors (six of
+eleven read a resource and then omitted it), not drift failures.
+
+That is a finding about the drift suite, not about the model: **all four drifts
+are advertised in the system prompt**, so an instruction-following agent adapts
+to every one of them. The failure the plan describes only happens when the agent's
+tool registry is stale - which is also the realistic case (pinned SDK, snapshot
+of the schema).
+
+`--stale-schema` implements that: the prompt keeps the clean tool list while the
+environment enforces v2. Verified end to end - the model calls
+`get_bucket_acl(bucket=...)` because that is what it was told, the environment
+replies `unexpected argument(s): bucket; use bucket_name`, the classifier says
+`drift_mismatch` and infers D1, and the corrective pair keeps the stale
+description while the chosen call uses `bucket_name`.
+
+This also makes the prompt-only control a real experiment: if adding one
+sentence to the description fixes D1, that is the honest answer to "why not just
+update the prompt?", and the plan asks us to publish it.
+
+---
+
 ## 6. What only you can do (critical path, 7 days)
 
 In order. Nothing here is optional for a competitive packet.

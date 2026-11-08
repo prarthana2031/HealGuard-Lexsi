@@ -109,7 +109,17 @@ python -m eval.rollout --adapter adapters/v0/final --bucket drift_targeted \
 # how much does each drift cost this model on the same clean tasks?
 python -m eval.rollout --adapter adapters/v0/final --bucket dev \
     --tag v0 --drift-override all
+
+# the realistic failure: a pinned tool registry against a moved API
+python -m eval.rollout --adapter adapters/v0_answer2/final --bucket drift_targeted \
+    --tag v0_stale --drift-override D1 --stale-schema
 ```
+
+`--stale-schema` keeps the **clean** tool description in the system prompt while
+the environment enforces v2. That is how a real agent breaks, and it is the only
+way an instruction-following model can be made to fail on a rename it would
+otherwise read straight off the tool list — v0_answer2 used `bucket_name` in 488
+of 488 bucket calls when the description advertised it.
 
 `--prompt-only-control` runs the clean prompt and the D1 hint on the same tasks
 and prints the delta. The five prompt arms are one sentence each, defined in
