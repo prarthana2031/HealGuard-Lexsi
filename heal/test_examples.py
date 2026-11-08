@@ -97,8 +97,10 @@ class TestCorrectiveExamples(unittest.TestCase):
         flipped = sum(
             1 for pair in poisoned if pair["provenance"].get("poisoned")
         )
+        share = flipped / len(poisoned)
         self.assertGreater(flipped, 0)
-        self.assertLessEqual(flipped / len(poisoned), 0.35)
+        self.assertGreaterEqual(share, 0.25, "poison too weak to be a fair test")
+        self.assertLessEqual(share, 0.35, "poison larger than the plan's 30%")
 
     def test_evaluation_seeds_are_known_to_the_leak_guard(self):
         from heal.examples import evaluation_seeds

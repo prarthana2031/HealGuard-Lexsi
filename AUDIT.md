@@ -413,8 +413,11 @@ limitations.
 1. **A drift that hurts:** each injected drift costs the baseline 30, 30, 45 and
    30 points on held-out seeds — measured, not asserted, and now *different per
    drift* because world v2 lets a drift break one family at a time.
-2. **Examples that replay:** 30 minimal-edit pairs for D1, 100% of chosen traces
-   replay to a perfect reward, asserted in CI on the emitted file, not the manifest.
+2. **Examples that replay:** 23 minimal-edit pairs for D1, built from real
+   v0_answer2 failures under a stale registry (seeds 30000-30059). Every pair
+   diverges at the first bucket read - `bucket` versus `bucket_name` - and 100%
+   of chosen traces replay to a perfect reward, asserted in CI on the emitted
+   file rather than on the manifest.
 3. **A gate that blocks a bad retrain:** the good candidate DEPLOYs on a one-sided
    paired bootstrap; the poisoned candidate is REJECTed on six named checks, each
    printed with its number.

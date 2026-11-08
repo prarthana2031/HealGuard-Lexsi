@@ -348,13 +348,16 @@ def build(drift: str, source: str) -> dict[str, Any]:
     seen: set[str] = set()
     skipped_no_divergence = 0
     skipped_no_replay = 0
+    skipped_success = 0
     capped_by_template = 0
     per_template: dict[str, int] = {}
 
     for failure in failures:
         pair = build_pair(failure, drift)
         if pair is None:
-            if not (failure.get("tool_calls") or []):
+            if failure.get("success") or failure.get("is_correct"):
+                skipped_success += 1
+            elif not (failure.get("tool_calls") or []):
                 skipped_no_divergence += 1
             else:
                 skipped_no_replay += 1
@@ -407,9 +410,12 @@ def build(drift: str, source: str) -> dict[str, Any]:
     # Poisoned variant: flip the *order* of one chosen/rejected pair in 30% of
     # rows.  A corrupted label, built on purpose — never a corrupted reward.
     poisoned = []
-    flip_every = max(1, int(round(1 / 0.30)))
+    flip_count = max(1, round(0.30 * len(pairs))) if pairs else 0
+    flipped_indices = {
+        int(index * len(pairs) / flip_count) for index in range(flip_count)
+    } if pairs else set()
     for index, pair in enumerate(pairs):
-        if index % flip_every == 0:
+        if index in flipped_indices:
             flipped = json.loads(json.dumps(pair))
             flipped["chosen"], flipped["rejected"] = pair["rejected"], pair["chosen"]
             flipped["provenance"]["poisoned"] = True
@@ -444,6 +450,7 @@ def build(drift: str, source: str) -> dict[str, Any]:
         "max_per_template": MAX_PER_TEMPLATE,
         "candidate_failures": len(failures),
         "excluded_leaked": excluded,
+        "skipped_success": skipped_success,
         "skipped_without_divergence": skipped_no_divergence,
         "skipped_without_replay": skipped_no_replay,
         "capped_by_template": capped_by_template,

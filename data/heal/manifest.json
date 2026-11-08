@@ -1,23 +1,25 @@
 {
   "drift": "D1",
-  "source": "simulator",
+  "source": "rollouts",
   "generated_by": "heal.examples",
   "template_id": "custom_tool_call_v1",
   "min_per_label": 8,
   "max_per_template": 40,
-  "candidate_failures": 100,
+  "candidate_failures": 60,
+  "excluded_leaked": 0,
+  "skipped_success": 37,
   "skipped_without_divergence": 0,
-  "skipped_without_replay": 70,
+  "skipped_without_replay": 0,
   "capped_by_template": 0,
-  "pairs": 30,
-  "clean_mix": 20,
-  "clean_mix_share": 0.4,
+  "pairs": 23,
+  "clean_mix": 15,
+  "clean_mix_share": 0.39473684210526316,
   "label_counts": {
-    "drift_mismatch": 30
+    "drift_mismatch": 23
   },
   "claimed_labels": [
     "drift_mismatch"
   ],
   "all_chosen_replay_to_1": true,
-  "poisoned_rows": 30
+  "poisoned_rows": 23
 }
