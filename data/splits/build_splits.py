@@ -47,7 +47,7 @@ from world.snapshot import generate_snapshot  # noqa: E402
 
 # pool start, pool size, tasks wanted
 SCHEDULE: dict[str, tuple[int, int, int]] = {
-    "train_clean": (0, 1500, 100),
+    "train_clean": (0, 1500, 400), # <--- Changed from 40 to 400
     "dev": (3000, 1000, 40),
     "drift_targeted": (6000, 1000, 60),
     "gate_regression": (10000, 1000, 60),
@@ -158,8 +158,13 @@ def build_split(
     filename: str = "expert_traces.jsonl",
 ) -> None:
     traces = []
-    for seed, _kind in assignments:
-        trace = run_expert(generate_snapshot(seed), drift=drift)
+    for i, (seed, _kind) in enumerate(assignments):
+        # Inject error in 20% of traces, but ONLY for train_clean
+        inject = (i % 5 == 0) if name == "train_clean" else False
+        
+        # Note: Added inject_error=inject to the run_expert call
+        trace = run_expert(generate_snapshot(seed), inject_error=inject, drift=drift)
+        
         trace["split"] = name
         trace["answer_kind"] = _kind
         traces.append(trace)
