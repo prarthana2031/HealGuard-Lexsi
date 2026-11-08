@@ -340,6 +340,23 @@ This also makes the prompt-only control a real experiment: if adding one
 sentence to the description fixes D1, that is the honest answer to "why not just
 update the prompt?", and the plan asks us to publish it.
 
+**Only two of the four drifts actually hurt, and the reason is instructive.**
+
+| Drift | Clean | Drifted | Drop |
+|---|---:|---:|---:|
+| D1 renamed argument | 0.800 | 0.500 | **0.30** |
+| D2 list return shape | 0.800 | 0.750 | 0.05 |
+| D3 region required | 0.800 | 0.500 | **0.30** |
+| D4 tool renamed | 0.800 | 0.700 | 0.10 |
+
+D4's unknown-tool error literally names the replacement (`Did you mean
+'get_acl'?`), so the model retries with the right tool and loses only one step.
+D2's response still contains the bucket ids, just under a new key, so the model
+finds them anyway. **A drift only hurts when the environment refuses to tell the
+agent how to fix it** - which is a finding about drift design worth a paragraph
+in the article, and a warning against making error messages too helpful in a
+demo whose point is that the agent cannot self-correct.
+
 ---
 
 ## 6. What only you can do (critical path, 7 days)

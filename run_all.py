@@ -500,6 +500,74 @@ def stage_report() -> None:
     else:
         lines.append("_Run `--stage drift`._")
 
+    # Model damage, if a rollout sweep has been run. Kept separate from the
+    # policy table above: one is a fixed policy, the other is the trained
+    # adapter, and mixing them in a single table is how a reader gets misled.
+    model_damage = None
+    for candidate in (
+        RUNS / "v0_stale_drift_damage.json",
+        *sorted(RUNS.glob("*_drift_damage.json")),
+    ):
+        if candidate.is_file():
+            model_damage = json.loads(candidate.read_text(encoding="utf-8"))
+            break
+
+    lines += ["", "## Drift damage (trained model, held-out dev seeds)", ""]
+    if model_damage:
+        # Accept both the sweep's own output (which carries n, the vulnerable
+        # split and step counts) and a hand-entered record. If the fields only a
+        # script can produce are missing, say so in the table rather than
+        # presenting hand-typed numbers as generated ones.
+        scripted = all(
+            isinstance(detail, dict) and "n" in detail
+            for detail in model_damage.values()
+        )
+        clean = model_damage.get("clean", {}).get("task_success", 0.0)
+
+        lines += [
+            "| Condition | N | Task success | Balanced | On vulnerable | "
+            "Drop vs clean | 20-point bar |",
+            "|---|---:|---:|---:|---:|---:|---|",
+        ]
+        for condition, detail in model_damage.items():
+            drop = detail.get("drop_vs_clean", clean - detail["task_success"])
+            balanced = detail.get("balanced_success", detail.get("balanced"))
+            bar = (
+                "n/a" if condition == "clean"
+                else ("yes" if drop >= 0.20 else "**no**")
+            )
+            n = detail.get("n", "hand")
+            vulnerable = detail.get("success_on_vulnerable")
+            lines.append(
+                f"| {condition} | {n} | {detail['task_success']:.3f} | "
+                f"{balanced:.3f} | "
+                f"{(f'{vulnerable:.3f}' if vulnerable is not None else 'n/a')} | "
+                f"{drop:+.3f} | {bar} |"
+            )
+
+        lines += [
+            "",
+            "Measured with `--stale-schema`: the prompt keeps the clean tool "
+            "list while the environment enforces the drifted API. That is the "
+            "failure this project is about, and without it an "
+            "instruction-following model reads the new name off the tool "
+            "description and adapts.",
+        ]
+        if not scripted:
+            lines += [
+                "",
+                "> **Provenance caveat.** These rows were entered by hand from "
+                "console output, not written by the sweep. Re-run `python -m "
+                "eval.rollout --bucket dev --drift-override all --stale-schema` "
+                "to get the generated artifact, which also carries N and the "
+                "vulnerable-task split.",
+            ]
+    else:
+        lines.append(
+            "_No model sweep yet. Run `python -m eval.rollout --bucket dev "
+            "--drift-override all --stale-schema`._"
+        )
+
     lines += ["", "## Gate decisions", ""]
     if decisions:
         lines += [
