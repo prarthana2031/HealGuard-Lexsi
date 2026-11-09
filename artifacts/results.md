@@ -62,8 +62,13 @@ Measured with `--stale-schema`: the prompt keeps the clean tool list while the e
 
 | Candidate | Decision | Reason |
 |---|---|---|
-| unknown | REJECT | Rejected because these checks failed: drift_targeted.steps_on_success, drift_targeted.redundant_call_rate |
-| unknown | REJECT | Rejected because these checks failed: drift_targeted.task_success_gain, drift_targeted.steps_on_success, gate_regression.steps_on_success |
+| v1_good | REJECT | Rejected because these checks failed: drift_targeted.steps_on_success, drift_targeted.redundant_call_rate |
+| v1_poisoned | REJECT | Rejected because these checks failed: drift_targeted.task_success_gain, drift_targeted.steps_on_success, gate_regression.steps_on_success |
+
+| Candidate | Gain | Steps (base -> cand) | Redundant (base -> cand) | Passed checks |
+|---|---:|---|---|---|
+| v1_good | +0.133 | 12 -> 15 | 0.006 -> 0.011 | 6/8 |
+| v1_poisoned | +0.083 | 12.0 -> 14.0 | 0.006 -> 0.001 | 6/8 |
 
 ## Classifier
 

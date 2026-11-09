@@ -9,3 +9,5 @@ artifacts/_test_tmp/
 artifacts/_test_registry/
 *ghcred*
 adapters/
+artifacts/sealed/*.incomplete.json
+artifacts/sealed/*.incomplete.md

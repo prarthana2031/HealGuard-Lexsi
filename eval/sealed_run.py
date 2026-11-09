@@ -293,15 +293,30 @@ def main() -> None:
         "decoding": "greedy" if args.temperature == 0 else f"temperature {args.temperature}",
         "conditions": results,
     }
+    # A partial run must never occupy the canonical path. The report reads
+    # `sealed_results.json` and treats its presence as "the sealed set has been
+    # scored"; a 6-task smoke file there is exactly how a toy table reaches an
+    # article. Incomplete runs go to a clearly named sibling instead, and the
+    # name is gitignored.
     out = Path(args.out)
+    if not payload["complete"]:
+        out = out.with_name("sealed_results.incomplete.json")
+        print(
+            f"\n  WARNING: only {len(tasks)} of 50 sealed tasks scored. Writing "
+            f"{out.name}; the canonical path is left untouched."
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     table = markdown(results, sha_before, none_tasks, len(tasks))
-    (out.parent / "sealed_results.md").write_text(table, encoding="utf-8")
+    md_name = (
+        "sealed_results.md" if payload["complete"]
+        else "sealed_results.incomplete.md"
+    )
+    (out.parent / md_name).write_text(table, encoding="utf-8")
     print()
     print(table)
-    print(f"wrote {out.relative_to(ROOT)} and sealed_results.md")
+    print(f"wrote {out.relative_to(ROOT)} and {md_name}")
 
 
 if __name__ == "__main__":

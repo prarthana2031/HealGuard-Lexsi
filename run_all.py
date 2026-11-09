@@ -644,6 +644,41 @@ def stage_report() -> None:
             decision = record.get("decision") or record.get("status") or "?"
             reason = (record.get("reason") or "").replace("|", "/")
             lines.append(f"| {candidate} | {decision} | {reason} |")
+        # The numbers behind each verdict. A rejection that names a check but
+        # not the measurement is unreadable six weeks later, and the reader needs
+        # `12 -> 15` next to the word "steps" to judge whether the gate was right.
+        lines += [
+            "",
+            "| Candidate | Gain | Steps (base -> cand) | Redundant (base -> cand) "
+            "| Passed checks |",
+            "|---|---:|---|---|---|",
+        ]
+        for record in decisions:
+            bucket = record.get("buckets", {}).get("drift_targeted", {})
+            checks = bucket.get("checks", {})
+
+            gain = checks.get("task_success_gain", {}).get("value")
+            steps = checks.get("steps_on_success", {}).get("value") or {}
+            redundant = checks.get("redundant_call_rate", {}).get("value") or {}
+
+            candidate = (
+                record.get("candidate")
+                or record.get("meta", {}).get("candidate")
+                or "unknown"
+            )
+            passed = [
+                name for name, check in checks.items()
+                if check.get("status") == "PASS"
+            ]
+            lines.append(
+                f"| {candidate} | "
+                f"{(f'{gain:+.3f}' if isinstance(gain, (int, float)) else 'n/a')} | "
+                f"{steps.get('baseline_median', '?')} -> "
+                f"{steps.get('candidate_median', '?')} | "
+                f"{redundant.get('baseline', 0):.3f} -> "
+                f"{redundant.get('candidate', 0):.3f} | "
+                f"{len(passed)}/{len(checks)} |"
+            )
     else:
         lines.append("_No decisions logged yet._")
 
