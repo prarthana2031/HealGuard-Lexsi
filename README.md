@@ -174,8 +174,23 @@ gates/           HealGate + decision log + adapter registry with rollback
 run_all.py       drift → detect → classify → generate → gate → report
 ```
 
-`AgentTune` trains and logs; `AuditKIT` scores and gates. The connection is a
-file: a training run's `trajectories.jsonl` is what AuditKIT evaluates.
+### Libraries actually used
+
+Stated precisely, because overclaiming here is the fastest way to lose.
+
+| Stage | Library | What it actually did |
+|---|---|---|
+| Training v0 and the DPO heal | **transformers + PEFT + TRL** (`SFTTrainer`, `DPOTrainer`) | loaded the 4-bit model, applied our chat template, ran the LoRA update |
+| Scoring | **AuditKIT** (`ak.scorer`, `ak.Score`, `ak.Direction`, `ak.AgentLoopDetection`, `ak.Sample`) | the six scorers are AuditKIT scorers with declared directions; loop detection is AuditKIT's |
+| Gate | **our code** (`gates/deployment_gate.py`) | paired bootstrap, family regression, efficiency, decision log |
+| World, oracle, expert, classifier, replay, healer | **our code** | the original contribution |
+| AgentTune | `agenttune.agentic` | **the S1 CPU spine smoke only.** It is not on the training path |
+
+The honest one-liner for the article: *AgentTune was evaluated for the spine
+(S1) and is pinned, but our trainer is TRL's `SFTTrainer`/`DPOTrainer` because we
+needed a custom tool-calling template that the stock path does not render.
+AuditKIT's scorer API is used for every metric we report; the gate itself is
+ours.* Do not claim AgentTune trained the adapters.
 
 ---
 

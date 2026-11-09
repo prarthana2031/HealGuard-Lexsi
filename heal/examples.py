@@ -321,7 +321,12 @@ def _dedupe_key(pair: dict[str, Any]) -> str:
     ).hexdigest()
 
 
-def build(drift: str, source: str) -> dict[str, Any]:
+def build(
+    drift: str,
+    source: str,
+    poison_fraction: float = 0.30,
+    clean_mix: float = (CLEAN_MIX_MIN + CLEAN_MIX_MAX) / 2,
+) -> dict[str, Any]:
     excluded = 0
     if source == "rollouts":
         failures, excluded = load_rollouts(drift)
@@ -385,8 +390,9 @@ def build(drift: str, source: str) -> dict[str, Any]:
     pairs = [pair for pair in pairs if pair["provenance"]["label"] in claimed]
 
     # Clean replay mix so the heal does not wipe the clean skill.
-    clean_quota = max(
-        1, int(len(pairs) * ((CLEAN_MIX_MIN + CLEAN_MIX_MAX) / 2) / (1 - (CLEAN_MIX_MIN + CLEAN_MIX_MAX) / 2))
+    clean_quota = (
+        0 if clean_mix <= 0
+        else max(1, int(len(pairs) * clean_mix / (1 - clean_mix)))
     )
     clean_traces = []
     for seed in SIM_SEEDS:
@@ -410,7 +416,7 @@ def build(drift: str, source: str) -> dict[str, Any]:
     # Poisoned variant: flip the *order* of one chosen/rejected pair in 30% of
     # rows.  A corrupted label, built on purpose — never a corrupted reward.
     poisoned = []
-    flip_count = max(1, round(0.30 * len(pairs))) if pairs else 0
+    flip_count = max(1, round(poison_fraction * len(pairs))) if pairs else 0
     flipped_indices = {
         int(index * len(pairs) / flip_count) for index in range(flip_count)
     } if pairs else set()
@@ -465,6 +471,8 @@ def build(drift: str, source: str) -> dict[str, Any]:
         "all_chosen_replay_to_1": all(
             pair["provenance"].get("chosen_perfect") for pair in pairs
         ),
+        "poison_fraction": poison_fraction,
+        "clean_mix_target": clean_mix,
         "poisoned_rows": len(poisoned),
     }
 
@@ -503,7 +511,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    result = build(args.drift, args.source)
+    result = build(
+        args.drift,
+        args.source,
+        poison_fraction=args.poison_fraction,
+        clean_mix=args.clean_mix,
+    )
     manifest = result["manifest"]
 
     if manifest["pairs"] == 0:

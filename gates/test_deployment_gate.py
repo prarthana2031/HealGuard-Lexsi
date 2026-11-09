@@ -294,7 +294,56 @@ class TestDeploymentGate(unittest.TestCase):
         for bucket in BUCKETS:
             check = result["buckets"][bucket]["checks"]["steps_on_success"]
             self.assertEqual(check["status"], "PASS")
-            self.assertEqual(check["value"]["compared_on"], "clean subset")
+            # no grounding field on these records, so the legacy definition runs
+            # and says so rather than silently treating them as ungrounded
+            self.assertIn("grounding not recorded", check["value"]["compared_on"])
+
+    def test_efficiency_ignores_ungrounded_successes(self):
+        """The check that produced the first verdict, and why it was wrong.
+
+        A broken baseline answers `[]` on `none` tasks without reading anything:
+        correct, cheap, ungrounded. Comparing all successes made the healed model
+        look slower for doing the reads. Only grounded successes are comparable.
+        """
+        baseline, candidate = make_paired_records(count=60)
+
+        for record in baseline + candidate:
+            record["drift"] = "D1"
+            record["grounded_success"] = record["success"]
+
+        baseline_successes = [r for r in baseline if r["success"]]
+        self.assertGreaterEqual(len(baseline_successes), 42)
+
+        # 30 of the baseline's successes were cheap and ungrounded
+        for record in baseline_successes[:30]:
+            record["grounded_success"] = False
+            record["num_steps"] = 2
+
+        result = evaluate_deployment_gate(baseline, candidate)
+        check = result["buckets"]["drift_targeted"]["checks"]["steps_on_success"]
+
+        self.assertEqual(check["value"]["efficiency_rule"], "grounded-paired-v2")
+        self.assertEqual(check["value"]["compared_on"], "grounded successes")
+        self.assertEqual(check["value"]["paired_n"], 12)
+        self.assertEqual(check["status"], "PASS")
+        # the legacy number that rejected the candidate is still reported
+        self.assertEqual(check["value"]["legacy_baseline_median"], 2)
+        self.assertEqual(check["value"]["legacy_candidate_median"], 4)
+
+    def test_no_common_grounded_success_blocks_the_comparison(self):
+        baseline, candidate = make_paired_records(count=60)
+        for record in baseline + candidate:
+            record["drift"] = "D1"
+            record["grounded_success"] = record["success"]
+        for record in baseline:
+            if record["success"]:
+                record["grounded_success"] = False
+
+        result = evaluate_deployment_gate(baseline, candidate)
+        check = result["buckets"]["drift_targeted"]["checks"]["steps_on_success"]
+
+        self.assertEqual(check["status"], "BLOCKED")
+        self.assertIn("grounded", check["detail"])
 
     def test_efficiency_still_fails_on_clean_regression(self):
         baseline, candidate = make_paired_records(count=60)

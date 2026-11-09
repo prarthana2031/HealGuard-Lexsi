@@ -108,7 +108,23 @@ drift and left clean behaviour unchanged, which is the normal outcome.
 | Redundant-call rate not higher | gate | gate |
 | No label newly above 2% | gate | gate |
 
-### Efficiency is compared like-for-like
+### Efficiency is compared on grounded successes
+
+An answer can be right by luck: on a `none` task, `[]` is correct even if the
+agent never read anything. Measured on the v0 rollouts under D1, **32 of 37
+successes (86%) were ungrounded**, and they took a median of **12 steps against
+14** for the grounded ones. A step comparison over all successes therefore
+rewards luck and punishes work.
+
+The population is now tasks where **both** runs were correct *and* made every
+required evidence call (`world/evidence.py`). Thresholds are unchanged, including
+the 1.05x limit — only who is in the sample changed. This rule was revised after
+seeing the first result; it is disclosed as post-hoc, and the legacy number is
+reported in the same check value under `legacy_*` so both are visible.
+
+Records from before the change carry no `grounded_success` field; for those the
+gate falls back to the old population and labels it "grounding not recorded"
+rather than assuming they are ungrounded.
 
 `steps_on_success` and `redundant_call_rate` are computed on the tasks **both
 runs solved**, and on the **clean-API subset** when the bucket has one.

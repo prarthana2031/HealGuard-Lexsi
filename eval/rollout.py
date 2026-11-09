@@ -55,6 +55,7 @@ from heal.drifts.registry import build_runtime  # noqa: E402
 from heal.replay import replay  # noqa: E402
 from oracle.checker import check_vulnerabilities  # noqa: E402
 from training.template import TOOL_TEMPLATE  # noqa: E402
+from world.evidence import is_grounded, missing_evidence  # noqa: E402
 from world.snapshot import generate_snapshot  # noqa: E402
 from world.tools import TOOL_SCHEMAS, CloudEnv  # noqa: E402
 
@@ -425,8 +426,11 @@ def run_episode(
         seen.add(signature)
 
     success = sorted(final_answer) == sorted(truth)
+    gap = missing_evidence(snapshot, calls)
 
     return {
+        "grounded_success": bool(success) and not gap,
+        "missing_evidence": len(gap),
         "id": f"{drift or 'clean'}_{seed}",
         "task_id": f"{drift or 'clean'}_{seed}",
         "seed": seed,
@@ -469,6 +473,10 @@ def to_record(trajectory: dict[str, Any], *, bucket: str, tag: str, variant: str
         "prompt_variant": variant,
         "stale_schema": trajectory.get("stale_schema", False),
         "success": trajectory["success"],
+        # Correct *and* every required evidence call made. The gate compares
+        # efficiency on these, because an ungrounded success is right by luck.
+        "grounded_success": trajectory.get("grounded_success", False),
+        "missing_evidence": trajectory.get("missing_evidence", 0),
         "num_steps": trajectory["num_steps"],
         "total_tool_calls": trajectory["total_tool_calls"],
         "redundant_calls": trajectory["redundant_calls"],
@@ -688,6 +696,13 @@ def main() -> None:
              "pinned tool registry against a moved API.",
     )
     parser.add_argument(
+        "--bucket-label",
+        choices=["drift_targeted", "gate_regression", "dev"],
+        help="Label a --seeds run as one of the gate buckets, so a fresh, never-"
+             "inspected block can be scored by the gate without reusing the "
+             "bucket's own seeds.",
+    )
+    parser.add_argument(
         "--seeds",
         help="START-END seed range to use instead of a bucket file, e.g. "
              "30000-30059. Use with --drift-override to make a drift-train set "
@@ -708,8 +723,11 @@ def main() -> None:
         except ValueError as exc:
             raise SystemExit(f"--seeds must be START-END, got {args.seeds!r}") from exc
         tasks = [{"seed": seed, "drift": None} for seed in range(start, end + 1)]
-        args.bucket = "drift_train"
-        print(f"seeds {start}-{end} ({len(tasks)} tasks) -> bucket label 'drift_train'")
+        args.bucket = args.bucket_label or "drift_train"
+        print(
+            f"seeds {start}-{end} ({len(tasks)} tasks) -> bucket label "
+            f"'{args.bucket}'"
+        )
         if args.drift_override in (None, "all"):
             raise SystemExit(
                 "--seeds needs an explicit --drift-override D1..D4 (or clean); "
