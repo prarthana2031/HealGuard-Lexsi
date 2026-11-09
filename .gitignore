@@ -8,3 +8,4 @@ output/
 artifacts/_test_tmp/
 artifacts/_test_registry/
 *ghcred*
+adapters/

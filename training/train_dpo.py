@@ -73,7 +73,6 @@ def run_dpo(
         learning_rate=learning_rate,
         num_train_epochs=epochs,
         max_length=2048,
-        max_prompt_length=1536,
         fp16=True,
         bf16=False,
         logging_steps=5,
