@@ -1,0 +1,24 @@
+{
+  "sealed_sha256": "19abf859754430298beedf84a08c7c1db7bcad93355669537cf869f3c384118a",
+  "tasks": 6,
+  "complete": false,
+  "none_tasks": 3,
+  "decoding": "greedy",
+  "conditions": {
+    "expert": {
+      "condition": "expert",
+      "n": 6,
+      "task_success": 1.0,
+      "ci95": [
+        0.6096569663469354,
+        0.9999999999999999
+      ],
+      "success_on_none": 1.0,
+      "success_on_vulnerable": 1.0,
+      "balanced_success": 1.0,
+      "median_steps": 13.0,
+      "redundant_rate": 0.0,
+      "mean_calls": 14.0
+    }
+  }
+}
