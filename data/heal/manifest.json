@@ -5,21 +5,25 @@
   "template_id": "custom_tool_call_v1",
   "min_per_label": 8,
   "max_per_template": 40,
-  "candidate_failures": 60,
+  "candidate_failures": 160,
   "excluded_leaked": 0,
-  "skipped_success": 37,
+  "skipped_success": 106,
   "skipped_without_divergence": 0,
   "skipped_without_replay": 0,
-  "capped_by_template": 0,
-  "pairs": 23,
-  "clean_mix": 15,
-  "clean_mix_share": 0.39473684210526316,
+  "capped_by_template": 14,
+  "pairs": 40,
+  "clean_mix": 26,
+  "clean_mix_share": 0.3939393939393939,
   "label_counts": {
-    "drift_mismatch": 23
+    "drift_mismatch": 23,
+    "env_error": 17
   },
   "claimed_labels": [
-    "drift_mismatch"
+    "drift_mismatch",
+    "env_error"
   ],
   "all_chosen_replay_to_1": true,
-  "poisoned_rows": 23
+  "poison_fraction": 0.0,
+  "clean_mix_target": 0.4,
+  "poisoned_rows": 40
 }
