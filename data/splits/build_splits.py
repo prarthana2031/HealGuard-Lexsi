@@ -62,6 +62,7 @@ RESERVED = {
     "archive_world_v1": (2000, 100),
     "classifier_battery": (7000, 400),
     "heal_simulator": (8000, 100),
+    "fresh_block": (40000, 160),
 }
 
 LEDGER = ROOT / "data" / "splits" / "seed_ledger.json"

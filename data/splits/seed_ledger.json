@@ -40,6 +40,10 @@
     "heal_simulator": [
       8000,
       100
+    ],
+    "fresh_block": [
+      40000,
+      160
     ]
   },
   "seeds": {
