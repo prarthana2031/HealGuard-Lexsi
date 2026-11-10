@@ -141,7 +141,7 @@ def main() -> None:
         save_total_limit=1,
         report_to="none",
         seed=SEED,
-        use_vllm=False,
+        #use_vllm=False,
     )
 
     trainer = SFTTrainer(
