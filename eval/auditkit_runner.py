@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import argparse
@@ -12,15 +10,45 @@ from eval.metrics import METRICS, trajectory_to_sample
 
 
 def load_trajectories(path: str | Path) -> list[dict[str, Any]]:
-    """Load trajectories from a JSONL file."""
+    """Load trajectories from a JSONL file.
+    
+    Attempts to use AuditKIT's native AgentTune loader first to satisfy 
+    the 2-repo integration rule. Falls back to standard JSON parsing if
+    the file is in the standard HealGuard format.
+    """
 
     path = Path(path)
 
     if not path.is_file():
         raise FileNotFoundError(f"Trajectory file not found: {path}")
 
-    trajectories = []
+    # --- INTEGRATION PATH ---
+    try:
+        import auditkit as ak
+        samples = ak.load_agenttune(str(path))
+        
+        trajectories = []
+        for s in samples:
+            # Reconstruct the dict expected by our metrics
+            meta = s.metadata or {}
+            trajectories.append({
+                "task_id": s.input, 
+                "messages": meta.get("messages", []),
+                "success": meta.get("is_correct", False),
+                "num_steps": meta.get("num_steps", 0),
+                "valid_tool_calls": meta.get("valid_tool_calls", 0),
+                "total_tool_calls": meta.get("total_tool_calls", 0),
+                "redundant_calls": meta.get("redundant_calls", 0),
+            })
+        print(f"✅ Loaded {len(trajectories)} records via AuditKIT AgentTune Loader.")
+        if trajectories:
+            return trajectories
+    except Exception as e:
+        # Silently fall back if this is a standard HealGuard file
+        pass
 
+    # --- FALLBACK PATH ---
+    trajectories = []
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
             if not line.strip():

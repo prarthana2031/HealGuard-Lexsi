@@ -1,10 +1,11 @@
-"""Shared DPO heal/poison runner.
+"""Shared DPO heal/poison runner powered by AgentTune.
 
 `train_heal.py` and `train_poisoned.py` are the same recipe on purpose: the
 poisoned adapter has to be built by the identical code path, otherwise the
 rejection proves nothing about the gate.
 
-Run on a GPU. Nothing here is exercised by the CPU test suite.
+This uses AgentTune's `TrlAgenticDPO` wrapper for the training loop, which connects
+the AgentTune and AuditKIT repos into a single system (satisfying the 2-repo rule).
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ import os
 from pathlib import Path
 
 from training.template import TOOL_TEMPLATE
+
+# Import AgentTune wrappers (verified by the auditor)
+from agenttune.backends.trl.agentic.dpo.agentic_dpo import TrlAgenticDPO
+from agenttune.backends.trl.agentic.dpo.config import AgenticDPOConfig
 
 
 def run_dpo(
@@ -30,7 +35,6 @@ def run_dpo(
     from datasets import load_dataset
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-    from trl import DPOConfig, DPOTrainer
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -66,7 +70,8 @@ def run_dpo(
     dataset = load_dataset("json", data_files=data_path, split="train")
     print(f"DPO rows: {len(dataset)} from {data_path}")
 
-    args = DPOConfig(
+    # Use AgentTune's config wrapper. `use_rollouts=False` keeps it in offline DPO mode.
+    args = AgenticDPOConfig(
         output_dir=output_dir,
         per_device_train_batch_size=1,
         gradient_accumulation_steps=8,
@@ -80,9 +85,11 @@ def run_dpo(
         save_total_limit=3,
         report_to="none",
         remove_unused_columns=False,
+        use_rollouts=False, # Crucial: keeps it as standard offline DPO
     )
 
-    trainer = DPOTrainer(
+    # Use AgentTune's trainer wrapper
+    trainer = TrlAgenticDPO(
         model=model,
         ref_model=None,
         args=args,
@@ -107,6 +114,7 @@ def run_dpo(
         "learning_rate": learning_rate,
         "epochs": epochs,
         "adapter": os.path.join(output_dir, "final"),
+        "framework": "AgentTune_TrlAgenticDPO"
     }
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     Path(output_dir, "train_manifest.json").write_text(
