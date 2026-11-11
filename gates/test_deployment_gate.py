@@ -364,5 +364,60 @@ class TestDeploymentGate(unittest.TestCase):
             )
 
 
+    def test_family_drop_exactly_at_threshold_passes(self):
+        """A true 5.00 pp drop is a pass: the frozen rule is inclusive.
+
+        Family success is a ratio of small integers, so 14/20 - 13/20 computes
+        to 0.050000000000000044.  Without the epsilon the gate rejects a
+        candidate that meets the written threshold exactly.
+        """
+        baseline, candidate = make_paired_records(count=60)
+
+        flipped = 0
+        for record in candidate:
+            if (
+                record["split"] == "drift_targeted"
+                and record["family"] == "F2"
+                and record["success"]
+                and flipped < 5
+            ):
+                record["success"] = False
+                record["failure_mode"] = "schema_violation"
+                flipped += 1
+        self.assertEqual(flipped, 5)
+
+        result = evaluate_deployment_gate(baseline, candidate)
+        check = result["buckets"]["drift_targeted"]["checks"][
+            "worst_family_regression"
+        ]
+
+        self.assertEqual(check["status"], "PASS")
+        self.assertEqual(check["value"]["worst_family"], "F2")
+        self.assertAlmostEqual(check["value"]["worst_drop"], 0.05, places=12)
+
+    def test_family_drop_above_threshold_still_fails(self):
+        """The epsilon must not turn a real 10 pp drop into a pass."""
+        baseline, candidate = make_paired_records(count=60)
+
+        flipped = 0
+        for record in candidate:
+            if (
+                record["split"] == "drift_targeted"
+                and record["family"] == "F2"
+                and record["success"]
+                and flipped < 6
+            ):
+                record["success"] = False
+                record["failure_mode"] = "schema_violation"
+                flipped += 1
+
+        result = evaluate_deployment_gate(baseline, candidate)
+        check = result["buckets"]["drift_targeted"]["checks"][
+            "worst_family_regression"
+        ]
+
+        self.assertEqual(check["status"], "FAIL")
+
+
 if __name__ == "__main__":
     unittest.main()

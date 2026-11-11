@@ -16,6 +16,13 @@ MIN_FAMILY_TASKS = 10
 BOOTSTRAP_ITERATIONS = 10_000
 BOOTSTRAP_SEED = 42
 
+# The frozen rule is `worst-family drop <= 0.05`, inclusive.  Family success is
+# a ratio of small integers, so a true 5.00 pp drop can compute to
+# 0.050000000000000044 in binary floating point.  Compare with a tolerance so
+# the code matches the written threshold; this is a numerical fix, not a
+# relaxation of the threshold, and it is disclosed in the article.
+FAMILY_DROP_EPSILON = 1e-9
+
 
 def _check(
     status: str,
@@ -379,7 +386,9 @@ def _evaluate_bucket(
             worst_drop = family_results[worst_family]["drop"]
 
             checks["worst_family_regression"] = _check(
-                "PASS" if worst_drop <= thresholds.worst_family_drop else "FAIL",
+                "PASS"
+                if worst_drop <= thresholds.worst_family_drop + FAMILY_DROP_EPSILON
+                else "FAIL",
                 value={
                     "family_results": family_results,
                     "skipped_families": skipped_families,
