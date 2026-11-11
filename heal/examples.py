@@ -509,8 +509,10 @@ def main() -> None:
     parser.add_argument(
         "--source", default="simulator", choices=["simulator", "rollouts"]
     )
+    parser.add_argument("--poison-fraction", type=float, default=0.0)
+    parser.add_argument("--clean-mix", type=float, default=0.4)
     args = parser.parse_args()
-
+    
     result = build(
         args.drift,
         args.source,
