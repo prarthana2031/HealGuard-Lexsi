@@ -1,9 +1,14 @@
-﻿"""Central selection of clean and drifted CloudEnv interfaces."""
+"""Central selection of clean and drifted CloudEnv interfaces.
+
+D2 is a pagination drift: the response envelope stays clean
+(``items`` / ``next_token``) and the page size is capped at one. The old
+return-shape drift is no longer registered.
+"""
 
 from world.tools import TOOL_SCHEMAS
 
 from heal.drifts.d1_renamed_arg import apply_d1, TOOL_SCHEMAS_D1
-from heal.drifts.d2_return_shape import apply_d2, TOOL_SCHEMAS_D2
+from heal.drifts.d2_pagination import apply_d2, TOOL_SCHEMAS_D2
 from heal.drifts.d3_new_required_region import apply_d3, TOOL_SCHEMAS_D3
 from heal.drifts.d4_renamed_tool import apply_d4, TOOL_SCHEMAS_D4
 

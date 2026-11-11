@@ -1,4 +1,4 @@
-﻿from world.tools import CloudEnv
+from world.tools import CloudEnv
 from heal.drifts.dispatcher import create_dispatcher
 
 
@@ -50,16 +50,25 @@ def test_d1_dispatcher_uses_renamed_argument():
     assert "schema_violation" in old_call["error"]
 
 
-def test_d2_dispatcher_uses_changed_return_shape():
+def test_d2_dispatcher_uses_pagination():
     dispatcher = create_dispatcher(make_env(), "D2")
 
     result = dispatcher.dispatch({
         "name": "list_buckets",
-        "arguments": {"limit": 1},
+        "arguments": {"limit": 100},
     })
     assert result == {
-        "bucket_list": ["bucket-1"],
-        "continuation": "1",
+        "items": ["bucket-1"],
+        "next_token": "1",
+    }
+
+    second = dispatcher.dispatch({
+        "name": "list_buckets",
+        "arguments": {"limit": 100, "next_token": result["next_token"]},
+    })
+    assert second == {
+        "items": ["bucket-2"],
+        "next_token": None,
     }
 
 

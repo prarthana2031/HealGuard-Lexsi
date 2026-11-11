@@ -1,6 +1,7 @@
-﻿import pytest
+import pytest
 
 from world.tools import CloudEnv
+from heal.drifts.d2_pagination import D2PaginatedEnv
 from heal.drifts.registry import (
     apply_drift,
     build_runtime,
@@ -42,8 +43,10 @@ def test_registry_returns_matching_schema_for_each_drift(drift):
             s["description"] for s in schemas
             if s["name"] == "list_buckets"
         )
-        assert "bucket_list" in description
-        assert "continuation" in description
+        assert "limit" in description
+        assert "next_token" in description
+        assert "bucket_list" not in description
+        assert isinstance(env, D2PaginatedEnv)
 
     elif drift == "D3":
         description = next(

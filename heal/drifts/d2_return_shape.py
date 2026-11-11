@@ -1,4 +1,9 @@
-"""D2: rename list_buckets response fields while preserving pagination."""
+"""LEGACY: D2 return-shape drift (retired).
+
+D2 is now a pagination drift in `heal.drifts.d2_pagination`. This module is not
+registered and must not be used as the active D2 behaviour; it is kept only so
+the old import path does not disappear from history.
+"""
 
 from world.tools import CloudEnv, TOOL_SCHEMAS
 
