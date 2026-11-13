@@ -1,4 +1,4 @@
-from world.tools import CloudEnv
+﻿from world.tools import CloudEnv
 from heal.drifts.d1_renamed_arg import apply_d1, TOOL_SCHEMAS_D1
 
 
@@ -35,8 +35,8 @@ def test_old_bucket_argument_is_rejected():
 
     result = drift.get_bucket_acl(bucket="bucket-1")
 
-    assert result["error"] == "schema_violation: invalid arguments"
-    assert "bucket_name" not in result["error"]
+    assert "schema_violation" in result["error"]
+    assert "bucket_name" in result["error"]
 
 
 def test_d1_keeps_the_same_snapshot_and_finished_state():

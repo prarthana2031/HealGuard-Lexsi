@@ -306,7 +306,7 @@ class TestStaleSchema(unittest.TestCase):
             message["content"] for message in trajectory["messages"]
             if message["role"] == "tool"
         )
-        self.assertIn("invalid arguments", tool_text)
+        self.assertIn("unexpected argument", tool_text)
 
         from classifier.rules import classify
         self.assertEqual(classify(trajectory)["primary"], "drift_mismatch")
@@ -475,8 +475,8 @@ class TestDriftOverride(unittest.TestCase):
             )
 
         # The same actions hit a different API: D1 rejects the old argument name.
-        self.assertNotIn("invalid arguments", tool_text(clean))
-        self.assertIn("invalid arguments", tool_text(forced))
+        self.assertNotIn("unexpected argument", tool_text(clean))
+        self.assertIn("unexpected argument", tool_text(forced))
         self.assertEqual(forced["drift"], "D1")
 
     def test_override_clean_normalises_to_no_drift(self):
