@@ -62,14 +62,31 @@ def test_registry_maps_d5_to_the_silent_environment():
     assert isinstance(runtime, D5SilentEmptyEnv)
 
 
-def test_d5_schema_advertises_bucket_name():
+def test_d5_schema_keeps_the_clean_bucket_contract():
     description = next(
         schema["description"]
         for schema in get_tool_schemas("D5")
         if schema["name"] == "get_bucket_acl"
     )
 
-    assert "bucket_name" in description
+    assert "bucket (str)" in description
+    assert "bucket_name" not in description
+
+
+def test_d5_failure_is_residual_not_schema_violation():
+    """The empty payload is the failure, not an invalid argument."""
+    from eval.run_agent import run_episode
+    from oracle.checker import check_vulnerabilities
+    from world.snapshot import generate_snapshot
+
+    seed = next(
+        seed
+        for seed in range(50)
+        if check_vulnerabilities(generate_snapshot(seed))
+    )
+    record = run_episode(seed, "D5", "stale", "dev")
+
+    assert record["failure_mode"] != "schema_violation"
 
 
 def test_apply_d5_can_be_disabled():

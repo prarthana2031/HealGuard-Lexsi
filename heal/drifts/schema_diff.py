@@ -119,14 +119,9 @@ SCHEMA_DIFFS: dict[str, SchemaDiff] = {
     "D5": SchemaDiff(
         drift_id="D5",
         description=(
-            "The bucket tools fail closed: `bucket` returns an empty object "
-            "and `bucket_name` returns the real payload."
+            "The bucket tools accept both `bucket` and the undocumented "
+            "`bucket_name` alias; `bucket` fails closed with an empty object."
         ),
-        renamed_args={
-            "get_bucket_acl": {"bucket": "bucket_name"},
-            "get_bucket_policy": {"bucket": "bucket_name"},
-            "get_public_access_block": {"bucket": "bucket_name"},
-        },
     ),
 }
 
@@ -160,6 +155,21 @@ def effective_specs(drift: str | None):
 
     diff = get_schema_diff(drift)
     if diff is None:
+        return specs, required
+
+    if diff.drift_id == "D5":
+        # D5 accepts both the stale `bucket` and the undocumented
+        # `bucket_name` alias. Neither is required: the failure is the empty
+        # payload, not a schema violation, so a trace that uses `bucket` is
+        # labelled residual rather than schema_violation.
+        for tool in (
+            "get_bucket_acl",
+            "get_bucket_policy",
+            "get_public_access_block",
+        ):
+            if tool in specs and "bucket" in specs[tool]:
+                specs[tool]["bucket_name"] = specs[tool]["bucket"]
+            required.setdefault(tool, set()).discard("bucket")
         return specs, required
 
     for old_tool, new_tool in diff.renamed_tools.items():

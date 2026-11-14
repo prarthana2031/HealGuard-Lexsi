@@ -13,9 +13,7 @@ is a deployable API behaviour. A silent empty payload is the failure mode a
 pinned client actually ships against.
 """
 
-from world.tools import CloudEnv
-
-from heal.drifts.d1_renamed_arg import TOOL_SCHEMAS_D1
+from world.tools import CloudEnv, TOOL_SCHEMAS
 
 
 class D5SilentEmptyEnv(CloudEnv):
@@ -77,9 +75,10 @@ class D5SilentEmptyEnv(CloudEnv):
         return self._base_env.get_public_access_block(bucket=bucket_name)
 
 
-# The expert and the fresh-schema run see the new argument; the stale client
-# keeps the clean prompt and therefore keeps sending `bucket`.
-TOOL_SCHEMAS_D5 = [dict(schema) for schema in TOOL_SCHEMAS_D1]
+# The stale client sees the clean contract (`bucket`). `bucket_name` is an
+# undocumented alias that returns real data; the expert knows it, the model must
+# discover it from the training pairs.
+TOOL_SCHEMAS_D5 = [dict(schema) for schema in TOOL_SCHEMAS]
 
 
 def apply_d5(env: CloudEnv, enabled: bool = True):
