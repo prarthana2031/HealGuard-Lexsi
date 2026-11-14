@@ -1,4 +1,4 @@
-"""D1: rename bucket arguments to bucket_name without changing world facts."""
+﻿"""D1: rename bucket arguments to bucket_name without changing world facts."""
 
 from world.tools import CloudEnv, TOOL_SCHEMAS
 
@@ -21,9 +21,11 @@ class D1DriftEnv(CloudEnv):
     @staticmethod
     def _validate_bucket_name(bucket_name, extra_args):
         if extra_args:
-            # D1-Harsh: do not name the replacement. The caller must already
-            # know the rename; the error is deliberately uninformative.
-            return {"error": "schema_violation: invalid arguments"}
+            names = ", ".join(sorted(extra_args))
+            return {"error": (
+                f"schema_violation: unexpected argument(s): {names}; "
+                "use bucket_name"
+            )}
         if not isinstance(bucket_name, str) or not bucket_name:
             return {"error": (
                 "schema_violation: bucket_name must be a non-empty string"

@@ -55,9 +55,6 @@ ENV_ERROR_RE = re.compile(
 RENAMED_ARG_RE = re.compile(
     r"unexpected argument\(s\):\s*(\w+)[;,]\s*use\s*(\w+)", re.I
 )
-GENERIC_SCHEMA_ERROR_RE = re.compile(
-    r"schema_violation:\s*invalid arguments", re.I
-)
 REQUIRED_ARG_RE = re.compile(
     r"(\w+)\s+is required", re.I
 )
@@ -212,33 +209,6 @@ def infer_schema_diff(
                 diff = get_schema_diff(drift)
                 if match.group(1) in diff.names():
                     return diff, "schema error names the new required argument"
-
-    # D1-Harsh: the environment rejects the old argument name without naming
-    # the replacement. The positive evidence is the call itself: one of the
-    # three renamed bucket tools was called with `bucket` and the environment
-    # returned a generic schema error. The clean API accepts `bucket`, so this
-    # pattern does not fire on healthy traces.
-    for result in results:
-        _, text = _error_of(result)
-        if not GENERIC_SCHEMA_ERROR_RE.search(text):
-            continue
-        index = result.get("call_index")
-        if not isinstance(index, int) or not (0 <= index < len(calls)):
-            continue
-        call = calls[index]
-        if call.get("name") not in {
-            "get_bucket_acl",
-            "get_bucket_policy",
-            "get_public_access_block",
-        }:
-            continue
-        arguments = call.get("arguments")
-        if not isinstance(arguments, dict) or "bucket" not in arguments:
-            continue
-        return (
-            get_schema_diff("D1"),
-            "generic schema error on the renamed bucket argument",
-        )
 
     for result in results:
         parsed = result.get("parsed")
