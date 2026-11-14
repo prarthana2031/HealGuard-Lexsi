@@ -99,6 +99,35 @@ python -m eval.rollout --adapter adapters/v6_recovery/final \
 - Report task success **and** grounded success; the baseline's ~50% task success
   is the none floor.
 
+## Launch rules
+
+1. **Push first.** The submitted repo must contain `7a2f5bc` (or its rebased
+   equivalent). Verify with `git ls-remote origin master` before GPU work.
+2. **Reference probe.** Run the one-step, lr=0 probe before the full DPO:
+
+   ```bash
+   python training/train_kl_dpo.py \
+     --data data/heal/dpo_pairs.jsonl \
+     --v0-adapter adapters/v0_answer2/final \
+     --output /tmp/kl_probe --probe
+   ```
+
+   `rewards/margins` and `rewards/chosen` should be ~0. A clearly non-zero
+   margin means the reference is the base model with the adapter off, not v0.
+
+3. **One candidate, final checkpoint only.** Do not choose a checkpoint on
+   `70000-70399`. If a second checkpoint is tested, it is a separate candidate
+   on a fresh block (`72000+`) and both are reported.
+4. **Eval order.** v0 on drift `70000-70199`, then v6 on drift. If the paired
+   gain is below +10 pp, stop; the gate answer is already known. Only then run
+   the clean pair `70200-70399`.
+5. **No clean `{}`.** Verified: no clean tool returns exactly `{}`; the clean
+   rollouts scanned contain zero exact-empty tool observations. The probe rule
+   `after {} -> bucket_name` cannot misfire on clean.
+6. **Section 5b sentence.** If v6 passes: the drift was built last, accepts both
+   `bucket` and `bucket_name`, and has an expert-supervised fix, so it is an
+   easier test than D1. Say so in one sentence.
+
 ## Hard stop
 
 At **13:00 IST**, stop GPU work. The article, Space and repo must already be

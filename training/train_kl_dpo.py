@@ -129,6 +129,7 @@ def train(args: argparse.Namespace) -> None:
         output_dir=args.output,
         beta=args.beta,
         num_train_epochs=args.epochs,
+        max_steps=args.max_steps,
         per_device_train_batch_size=1,
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
@@ -151,6 +152,14 @@ def train(args: argparse.Namespace) -> None:
         processing_class=tokenizer,
     )
     trainer.train()
+
+    if args.probe:
+        print(
+            "\nprobe complete. With lr=0 the logged step-1 weights are still v0; "
+            "rewards/margins and rewards/chosen should be ~0. A clearly "
+            "non-zero margin means the reference is not v0."
+        )
+        return
 
     output = Path(args.output) / "final"
     trainer.save_model(str(output))
@@ -184,9 +193,21 @@ def main() -> None:
     parser.add_argument("--epochs", type=float, default=1.0)
     parser.add_argument("--grad-accum", type=int, default=8)
     parser.add_argument("--max-len", type=int, default=2048)
+    parser.add_argument("--max-steps", type=int, default=-1)
+    parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="One step at lr=0; check that rewards/margins and rewards/chosen "
+             "are ~0, proving the reference is v0 rather than the base model.",
+    )
     parser.add_argument("--no-reference", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    if args.probe:
+        args.max_steps = 1
+        args.lr = 0.0
+        print("probe: one step, lr=0, logging_steps=1")
 
     if args.dry_run:
         dry_run(Path(args.data), args.beta)
