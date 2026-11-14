@@ -505,7 +505,7 @@ def write(result: dict[str, Any]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--drift", default="D1", choices=["D1", "D2", "D3", "D4"])
+    parser.add_argument("--drift", default="D1", choices=["D1", "D2", "D3", "D4", "D5"])
     parser.add_argument(
         "--source", default="simulator", choices=["simulator", "rollouts"]
     )

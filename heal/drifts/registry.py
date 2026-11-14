@@ -11,6 +11,7 @@ from heal.drifts.d1_renamed_arg import apply_d1, TOOL_SCHEMAS_D1
 from heal.drifts.d2_pagination import apply_d2, TOOL_SCHEMAS_D2
 from heal.drifts.d3_new_required_region import apply_d3, TOOL_SCHEMAS_D3
 from heal.drifts.d4_renamed_tool import apply_d4, TOOL_SCHEMAS_D4
+from heal.drifts.d5_silent_empty import apply_d5, TOOL_SCHEMAS_D5
 
 
 DRIFT_REGISTRY = {
@@ -18,6 +19,7 @@ DRIFT_REGISTRY = {
     "D2": (apply_d2, TOOL_SCHEMAS_D2),
     "D3": (apply_d3, TOOL_SCHEMAS_D3),
     "D4": (apply_d4, TOOL_SCHEMAS_D4),
+    "D5": (apply_d5, TOOL_SCHEMAS_D5),
 }
 
 

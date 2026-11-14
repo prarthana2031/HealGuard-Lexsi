@@ -116,6 +116,18 @@ SCHEMA_DIFFS: dict[str, SchemaDiff] = {
         ),
         renamed_tools={"get_bucket_acl": "get_acl"},
     ),
+    "D5": SchemaDiff(
+        drift_id="D5",
+        description=(
+            "The bucket tools fail closed: `bucket` returns an empty object "
+            "and `bucket_name` returns the real payload."
+        ),
+        renamed_args={
+            "get_bucket_acl": {"bucket": "bucket_name"},
+            "get_bucket_policy": {"bucket": "bucket_name"},
+            "get_public_access_block": {"bucket": "bucket_name"},
+        },
+    ),
 }
 
 

@@ -78,7 +78,7 @@ def test_disabled_drift_returns_clean_runtime():
 
 def test_unknown_drift_is_rejected():
     with pytest.raises(ValueError, match="Unknown drift"):
-        apply_drift(make_env(), "D5")
+        apply_drift(make_env(), "D6")
 
 
 def test_schema_results_are_copies():

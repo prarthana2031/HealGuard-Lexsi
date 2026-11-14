@@ -191,7 +191,7 @@ def run_expert(
 
     # Argument names move with the API version, exactly as a trained model's
     # would have to.  The expert is allowed to know the new schema.
-    bucket_arg = "bucket_name" if drift == "D1" else "bucket"
+    bucket_arg = "bucket_name" if drift in {"D1", "D5"} else "bucket"
     region = {"region": "us-east-1"} if drift == "D3" else {}
     acl_tool = "get_acl" if drift == "D4" else "get_bucket_acl"
 

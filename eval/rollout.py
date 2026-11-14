@@ -88,6 +88,10 @@ PROMPT_VARIANTS = {
     "prompt_only_d4": (
         "Note: `get_bucket_acl` has been renamed to `get_acl`."
     ),
+    "prompt_only_d5": (
+        "Note: the bucket tools take `bucket_name`; a call with `bucket` "
+        "returns an empty object."
+    ),
 }
 
 CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
@@ -785,7 +789,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--drift-override",
-        choices=["clean", "D1", "D2", "D3", "D4", "all"],
+        choices=["clean", "D1", "D2", "D3", "D4", "D5", "all"],
         help="Force the API version the model faces. 'all' sweeps clean + D1-D4 "
              "over the same tasks and prints the damage table (Stage 1.6).",
     )
@@ -899,7 +903,7 @@ def main() -> None:
         # This is Stage 1.6 of the plan — "each drift must cost at least 20
         # points" — measured on the model instead of asserted.
         damage: dict[str, dict[str, Any]] = {}
-        for forced in ("clean", "D1", "D2", "D3", "D4"):
+        for forced in ("clean", "D1", "D2", "D3", "D4", "D5"):
             records, _trajectories = _run_variant(
                 backend,
                 tasks,
