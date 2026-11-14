@@ -92,6 +92,67 @@ PROMPT_VARIANTS = {
 
 CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
 
+# Runtime repair guard (D1). The model keeps the clean schema, so under a
+# renamed API it still asks for `bucket`. The guard rewrites that one argument
+# to `bucket_name` and retries, then shows the model the successful result.
+# It is opt-in and never touches clean traffic.
+GUARD_TOOLS = {
+    "get_bucket_acl",
+    "get_bucket_policy",
+    "get_public_access_block",
+}
+GUARD_STALE_ARG = "bucket"
+GUARD_FIXED_ARG = "bucket_name"
+
+
+def _render_tool_call(name: str, arguments: dict[str, Any]) -> str:
+    return (
+        "<tool_call>\n"
+        + json.dumps({"name": name, "arguments": arguments})
+        + "\n</tool_call>"
+    )
+
+
+def _guard_repair(
+    name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+    drift: str | None,
+) -> dict[str, Any] | None:
+    """Return repaired arguments for a D1 bucket-tool schema error.
+
+    The D1-Harsh error is deliberately generic (`invalid arguments`), so the
+    guard cannot parse the new name out of the message; it is configured with
+    the drift's rename. Under the old helpful error the same mapping applies.
+    """
+    if str(drift).upper() != "D1":
+        return None
+    if name not in GUARD_TOOLS:
+        return None
+    if not isinstance(result, dict) or "error" not in result:
+        return None
+    if "schema_violation" not in str(result.get("error", "")):
+        return None
+    if not isinstance(arguments, dict):
+        return None
+
+    if GUARD_FIXED_ARG in arguments:
+        # A model that emits both names: drop the stale one and retry.
+        if GUARD_STALE_ARG in arguments:
+            return {
+                key: value
+                for key, value in arguments.items()
+                if key != GUARD_STALE_ARG
+            }
+        return None
+
+    if GUARD_STALE_ARG not in arguments:
+        return None
+
+    repaired = dict(arguments)
+    repaired[GUARD_FIXED_ARG] = repaired.pop(GUARD_STALE_ARG)
+    return repaired
+
 
 # ---------------------------------------------------------------------------
 # Backends
@@ -298,6 +359,7 @@ def run_episode(
     max_new_tokens: int = MAX_NEW_TOKENS,
     drift_override: str | None = None,
     stale_schema: bool = False,
+    repair_guard: bool = False,
 ) -> dict[str, Any]:
     """Generate one full trajectory against the real environment.
 
@@ -335,6 +397,8 @@ def run_episode(
     calls: list[dict[str, Any]] = []
     invalid_calls = 0
     finished = False
+    guard_repairs = 0
+    guard_attempts = 0
 
     for _step in range(max_steps):
         raw = backend.generate(messages, max_new_tokens)
@@ -403,6 +467,28 @@ def run_episode(
         else:
             result = {"error": f"unknown_tool: Tool {name!r} not found"}
 
+        if repair_guard and callable(function):
+            repaired = _guard_repair(name, arguments, result, drift)
+            if repaired is not None:
+                guard_attempts += 1
+                try:
+                    retry = function(**repaired)
+                except TypeError as exc:
+                    retry = {"error": f"schema_violation: {exc}"}
+                if isinstance(retry, dict) and "error" not in retry:
+                    guard_repairs += 1
+                    # The model sees the successful observation as if it had
+                    # asked correctly. Keep the scoring trace consistent with
+                    # that observation; record the repair for the article.
+                    messages[-1] = {
+                        "role": "assistant",
+                        "content": _render_tool_call(name, repaired),
+                    }
+                    calls[-1] = {"name": name, "arguments": repaired}
+                    result = retry
+                else:
+                    result = retry
+
         messages.append({"role": "tool", "content": json.dumps(result, default=str)})
 
     final_answer = []
@@ -456,6 +542,9 @@ def run_episode(
         "error": None,
         "is_none_task": not truth,
         "invalid_calls": invalid_calls,
+        "repair_guard": repair_guard,
+        "guard_repairs": guard_repairs,
+        "guard_attempts": guard_attempts,
         "ground_truth": truth,
     }
 
@@ -486,6 +575,9 @@ def to_record(trajectory: dict[str, Any], *, bucket: str, tag: str, variant: str
         "invalid_calls": trajectory["invalid_calls"],
         "is_none_task": trajectory["is_none_task"],
         "drift_inferred": classification["drift_inferred"],
+        "repair_guard": trajectory.get("repair_guard", False),
+        "guard_repairs": trajectory.get("guard_repairs", 0),
+        "guard_attempts": trajectory.get("guard_attempts", 0),
     }
 
 
@@ -521,6 +613,8 @@ def summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
             if records else 0.0
         ),
         "invalid_call_tasks": sum(1 for row in records if row["invalid_calls"] > 0),
+        "guard_repairs": sum(row.get("guard_repairs", 0) for row in records),
+        "guard_tasks": sum(1 for row in records if row.get("guard_repairs", 0) > 0),
         "labels": {
             label: sum(1 for row in records if row["failure_mode"] == label)
             for label in sorted({row["failure_mode"] for row in records if row["failure_mode"]})
@@ -542,6 +636,11 @@ def print_summary(title: str, summary: dict[str, Any]) -> None:
         f"tasks_that_called_a_tool={summary['call_rate']:.1%}  "
         f"tasks_with_a_malformed_call={summary['invalid_call_tasks']}"
     )
+    if summary.get("guard_repairs"):
+        print(
+            f"    guard repairs={summary['guard_repairs']} "
+            f"across {summary['guard_tasks']} task(s)"
+        )
     if summary["labels"]:
         labels = ", ".join(f"{name}x{count}" for name, count in summary["labels"].items())
         print(f"    failure labels: {labels}")
@@ -606,6 +705,7 @@ def _run_variant(
     filename_label: str | None = None,
     records_dir: Path | None = None,
     stale_schema: bool = False,
+    repair_guard: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     selected = tasks[:limit] if limit else tasks
     trajectories = []
@@ -622,6 +722,7 @@ def _run_variant(
             max_new_tokens=max_new_tokens,
             drift_override=drift_override,
             stale_schema=stale_schema,
+            repair_guard=repair_guard,
         )
         trajectories.append(trajectory)
         records.append(
@@ -694,6 +795,13 @@ def main() -> None:
         help="Keep the CLEAN tool description in the system prompt while the "
              "environment enforces the drifted API. Models the real failure: a "
              "pinned tool registry against a moved API.",
+    )
+    parser.add_argument(
+        "--repair-guard",
+        action="store_true",
+        help="D1 runtime guard: when a bucket tool rejects `bucket`, retry once "
+             "with `bucket_name` and show the model the successful result. "
+             "Clean traffic is never touched. Repairs are recorded per task.",
     )
     parser.add_argument(
         "--bucket-label",
@@ -807,6 +915,7 @@ def main() -> None:
                 filename_label=f"{variants[0]}_{forced}"
                 + ("_stale" if args.stale_schema else ""),
                 stale_schema=args.stale_schema,
+                repair_guard=args.repair_guard,
             )
             damage[forced] = summarise(records)
 
@@ -846,6 +955,7 @@ def main() -> None:
             drift_override=forced,
             filename_label=label,
             stale_schema=args.stale_schema,
+            repair_guard=args.repair_guard,
         )
         results[variant] = records
         written[variant] = _output_paths(args.bucket, args.tag, label)[0]

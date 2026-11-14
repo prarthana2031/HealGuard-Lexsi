@@ -187,6 +187,111 @@ class TestRollout(unittest.TestCase):
         self.assertEqual(first["final_answer"], second["final_answer"])
 
 
+class TestRepairGuard(unittest.TestCase):
+    """The opt-in D1 runtime repair: silent, clean-safe, and auditable."""
+
+    def _clean_policy_script(self, seed):
+        from eval.run_agent import run_stale
+
+        return [
+            call_text(call["name"], call["arguments"])
+            for call in run_stale(seed, None)["tool_calls"]
+        ]
+
+    def test_guard_repairs_d1_and_grounds_the_trace(self):
+        seed = a_vulnerable_seed()
+        responses = self._clean_policy_script(seed)
+
+        trajectory = run_episode(
+            ScriptedBackend(responses),
+            seed,
+            None,
+            drift_override="D1",
+            stale_schema=True,
+            repair_guard=True,
+            max_steps=30,
+        )
+
+        self.assertTrue(trajectory["repair_guard"])
+        self.assertGreater(trajectory["guard_repairs"], 0)
+        self.assertEqual(trajectory["missing_evidence"], 0)
+        self.assertTrue(trajectory["grounded_success"])
+
+        tool_text = " ".join(
+            message["content"]
+            for message in trajectory["messages"]
+            if message["role"] == "tool"
+        )
+        self.assertNotIn("schema_violation", tool_text)
+
+    def test_without_guard_the_same_script_is_ungrounded(self):
+        seed = a_vulnerable_seed()
+        responses = self._clean_policy_script(seed)
+
+        trajectory = run_episode(
+            ScriptedBackend(responses),
+            seed,
+            None,
+            drift_override="D1",
+            stale_schema=True,
+            repair_guard=False,
+            max_steps=30,
+        )
+
+        self.assertEqual(trajectory["guard_repairs"], 0)
+        tool_text = " ".join(
+            message["content"]
+            for message in trajectory["messages"]
+            if message["role"] == "tool"
+        )
+        self.assertIn("schema_violation", tool_text)
+        self.assertIn("bucket", json.dumps(trajectory["tool_calls"]))
+        self.assertNotIn("bucket_name", json.dumps(trajectory["tool_calls"]))
+
+    def test_guard_leaves_clean_traffic_untouched(self):
+        seed = a_vulnerable_seed()
+        responses = self._clean_policy_script(seed)
+
+        trajectory = run_episode(
+            ScriptedBackend(responses),
+            seed,
+            None,
+            drift_override="clean",
+            stale_schema=False,
+            repair_guard=True,
+            max_steps=30,
+        )
+
+        self.assertEqual(trajectory["guard_repairs"], 0)
+        self.assertTrue(trajectory["grounded_success"])
+
+    def test_guard_returns_the_retry_error_when_the_fix_also_fails(self):
+        seed = a_vulnerable_seed()
+        responses = [
+            call_text("get_bucket_acl", {"bucket": "bucket-does-not-exist"}),
+            call_text("finish", {"answer": []}),
+        ]
+
+        trajectory = run_episode(
+            ScriptedBackend(responses),
+            seed,
+            None,
+            drift_override="D1",
+            stale_schema=True,
+            repair_guard=True,
+            max_steps=5,
+        )
+
+        self.assertEqual(trajectory["guard_attempts"], 1)
+        self.assertEqual(trajectory["guard_repairs"], 0)
+        tool_text = " ".join(
+            message["content"]
+            for message in trajectory["messages"]
+            if message["role"] == "tool"
+        )
+        self.assertIn("NoSuchBucket", tool_text)
+
+
 class TestRecordContract(unittest.TestCase):
 
     def setUp(self):
