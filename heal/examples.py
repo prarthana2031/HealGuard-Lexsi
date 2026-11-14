@@ -266,10 +266,34 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
     chosen_messages = _render_side(seed, drift, chosen_calls, stale_schema)
     rejected_messages = _render_side(seed, drift, failure_calls, stale_schema)
 
-    # Two messages per call (assistant + tool), plus system and user.
-    prefix_length = 2 + 2 * divergence
-    if chosen_messages[:prefix_length] != rejected_messages[:prefix_length]:
-        return None  # the runs were not comparable; never force a pair
+    if drift == "D5":
+        # The cue is the empty payload, so the prompt must end *after* the
+        # stale call and its `{}` observation. The next turn is the choice:
+        # rewrite to `bucket_name` (chosen) versus continue/finish (rejected).
+        failure_messages = failure.get("messages") or []
+        prefix_end = 2 + 2 * divergence + 2
+        if prefix_end > len(failure_messages):
+            return None
+        prompt = failure_messages[:prefix_end]
+        if (
+            not prompt
+            or prompt[-1].get("role") != "tool"
+            or str(prompt[-1].get("content", "")).strip() != "{}"
+        ):
+            return None
+        chosen_start = 2 + 2 * divergence
+        chosen = chosen_messages[chosen_start:chosen_start + 2]
+        rejected = failure_messages[prefix_end:prefix_end + 2]
+        if not chosen or not rejected:
+            return None
+    else:
+        # Two messages per call (assistant + tool), plus system and user.
+        prefix_length = 2 + 2 * divergence
+        if chosen_messages[:prefix_length] != rejected_messages[:prefix_length]:
+            return None  # the runs were not comparable; never force a pair
+        prompt = chosen_messages[:prefix_length]
+        chosen = chosen_messages[prefix_length:]
+        rejected = rejected_messages[prefix_length:]
 
     rejected_replay = replay(snapshot, failure_calls, drift)
 
@@ -281,9 +305,9 @@ def build_pair(failure: dict[str, Any], drift: str) -> dict[str, Any] | None:
     classification = classify(failure)
 
     return {
-        "prompt": chosen_messages[:prefix_length],
-        "chosen": chosen_messages[prefix_length:],
-        "rejected": rejected_messages[prefix_length:],
+        "prompt": prompt,
+        "chosen": chosen,
+        "rejected": rejected,
         "provenance": {
             "source_run": failure.get("task_id"),
             "source": failure.get("source"),

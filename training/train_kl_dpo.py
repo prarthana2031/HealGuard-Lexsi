@@ -109,12 +109,17 @@ def train(args: argparse.Namespace) -> None:
         ref_model = None
     else:
         print("reference: frozen v0 adapter")
+        # Explicit v0 anchor. TRL uses `ref_model` directly when it is passed;
+        # it does not silently fall back to the base model with the adapter
+        # disabled. The reference is a second base + the same v0 adapter,
+        # frozen, so the KL term points at v0 rather than the untuned base.
         ref_model = PeftModel.from_pretrained(
             base_model(), str(adapter), is_trainable=False
         )
         ref_model.eval()
         for parameter in ref_model.parameters():
             parameter.requires_grad_(False)
+        assert ref_model is not model
 
     dataset = load_dataset("json", data_files=args.data, split="train")
     dataset = dataset.select_columns(["prompt", "chosen", "rejected"])
